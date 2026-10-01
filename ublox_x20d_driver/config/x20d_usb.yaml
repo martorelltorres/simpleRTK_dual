@@ -5,7 +5,7 @@ device: /dev/ttyACM0
 frame_id: gps
 
 # Measurement period and solutions per measurement. The dual-antenna heading is only
-# resolved at 1-2 Hz on HDG 2.00 firmware: keep rate_meas_ms at 500 or above.
+# reliable at 1 Hz on HDG 2.00 firmware: keep rate_meas_ms at 1000.
 rate_meas_ms: 1000
 rate_nav: 1
 

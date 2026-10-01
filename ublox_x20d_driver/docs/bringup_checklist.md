@@ -31,7 +31,7 @@ counts as a pass. Record every run in a bag and, where noted, with raw logging e
 |---|---|
 | `roslaunch ublox_x20d_driver ublox_x20d.launch device:=/dev/ublox_x20d` | Log shows `receiver MON-VER: MOD=ZED-X20D FWVER=HDG 2.00 ...` and `user configuration verified on device (N keys)`; no NAK or ERROR lines |
 | `rostopic hz` on `nav_pvt`, `nav_hpposllh`, `nav_daheading` | About 1 Hz each; the `link` diagnostic shows at most about 1 NMEA sentence per second (`$GNTHS`) |
-| `rate_meas_ms:=500` for 5 minutes, then back to 1000 | Topics at 2 Hz with `rel_pos_heading_valid` held; the heading re-fixes within seconds after going back |
+| `rate_meas_ms:=500` for 5 minutes, then back to 1000 | Position topics at 2 Hz; note the `nav_daheading` rate and its share of fixed epochs (HDG 2.00 does not sustain the heading at 2 Hz); the heading re-fixes within seconds after going back |
 | `receiver_heading_offset_deg:=90` against 0, bar still | `rel_pos_heading` changes by +90° (mod 360); `rel_pos_n`/`rel_pos_e` unchanged |
 | `receiver_heading_offset_deg:=200` | The node refuses to start |
 | Restart the driver five times in a row | Verified on the first attempt every time |
@@ -57,7 +57,7 @@ Record 10 minutes static with raw logging and a bag of `/ublox_x20d/*` and
 | Turn the bar through the four marks, clockwise seen from above, one minute each | The heading grows by 90° ± 3° per step and the Imu yaw decreases by π/2 per step |
 | **Walk test:** carry the bar with GPS2 in front, in a straight line at 1 m/s or more, 30 s in each of two opposite directions | `head_mot` of `nav_pvt` agrees with `rel_pos_heading` within 5°; `~vel` points the same way. This is the absolute check: a swapped antenna pair shows as 180°, a wrong axis as 90° |
 | Put the block under GPS2, then under GPS1 | Pitch ≈ −asin(h/L), then +asin(h/L), within 1° (positive pitch is nose down) |
-| Cover GPS2 with a metal bowl or foil for a minute, then uncover | `rel_pos_heading_valid` (flags bit 6) drops, the Imu stops within two epochs, the `heading` diagnostic warns; note the time to re-fix |
+| Cover GPS2 with a metal bowl or foil for a minute, then uncover | `carr_soln` falls below 2 and the Imu stops within two epochs; `rel_pos_heading_valid` (flags bit 6) drops a few epochs later, with `rel_pos_valid` still set; the `heading_imu` diagnostic warns; note the time to re-fix |
 | Replay the static bag with `expected_baseline_length_m` set to the tape length, then to it plus 0.2 m | No epochs dropped / every epoch dropped with a warning |
 
 ## 5. Position and RTK

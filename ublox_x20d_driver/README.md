@@ -42,7 +42,8 @@ cannot open it.
 ### Antenna placement
 
 The module measures the vector from antenna **GPS1** (primary) to antenna **GPS2**
-(secondary). Mount both on the vehicle's centre line:
+(secondary). On the simpleRTK4 Dual, GPS1 is the antenna connected to **RF1** and GPS2 the
+one connected to **RF2**. Mount both on the vehicle's centre line:
 
 ```
           stern                         bow
@@ -62,11 +63,13 @@ The module measures the vector from antenna **GPS1** (primary) to antenna **GPS2
 
 ### Update rate
 
-On HDG 2.00 firmware the dual-antenna heading is only resolved at 1–2 Hz: at 1 Hz it stays
-valid with fixed ambiguities indefinitely; at 3 Hz it is lost within about 10 s and at 10 Hz
-the ambiguities are never fixed. The default measurement period is 1000 ms, and the driver warns if
-`rate_meas_ms` is set below 500 ms. For higher-rate heading, fuse this output with a
-gyroscope.
+On HDG 2.00 firmware the dual-antenna heading is only reliable at 1 Hz, where it stays valid
+with fixed ambiguities indefinitely. At 2 Hz (`rate_meas_ms: 500`) position output keeps
+the rate, but `NAV-DAHEADING` arrives irregularly (about 0.6 Hz on average) and only about
+half of its epochs have fixed ambiguities; at 3 Hz the heading is lost within about 10 s and
+at 10 Hz the ambiguities are never fixed. Keep the default measurement period of 1000 ms;
+the driver warns if `rate_meas_ms` is set below 500 ms. For higher-rate heading, fuse this
+output with a gyroscope.
 
 ## Quick start
 
@@ -134,7 +137,7 @@ and read back; nothing is written to flash or battery-backed RAM.
 | `frame_id` | `gps` | `frame_id` of every published message |
 | `reopen_period` | `1.0` | Seconds between attempts to (re)open the port |
 | `publish_gga` | `false` | Publish `~nmea` GGA sentences for an NTRIP caster |
-| `rate_meas_ms` | `1000` | **RAM** `CFG_RATE_MEAS`, measurement period in ms (keep ≥ 500, see [Update rate](#update-rate)) |
+| `rate_meas_ms` | `1000` | **RAM** `CFG_RATE_MEAS`, measurement period in ms (keep at 1000, see [Update rate](#update-rate)) |
 | `rate_nav` | `1` | **RAM** `CFG_RATE_NAV`, measurements per navigation solution |
 | `dyn_model` | `5` | **RAM** `CFG_NAVSPG_DYNMODEL`, dynamic platform model (5 = sea) |
 | `receiver_heading_offset_deg` | `0.0` | **RAM** `CFG_NAVSPG_DAHEADING_OFFSET`, added by the receiver to the heading; within ±180 |
@@ -211,9 +214,20 @@ measured baseline length differs from the expected one (if configured).
 | `min_pitch_std_dev_rad` | `0.001` | Floor on the pitch standard deviation |
 | `frame_id` | `""` | Output `frame_id`; empty keeps the one of the input message |
 
-If the heading never reaches fixed ambiguities in your setup, for example without RTK
-corrections, lower `min_carr_soln` or enable `publish_degraded`; the `heading` diagnostic of
-the driver shows the carrier-phase state.
+The heading is solved between the two antennas of the module and reaches fixed ambiguities
+without RTK corrections. Keep `min_carr_soln` at 2 and `publish_degraded` off unless a
+downstream filter can cope with gross errors:
+
+- With float ambiguities the heading can be off by tens of degrees while the receiver
+  reports a heading accuracy of a few degrees or less.
+- `relPosHeadingValid` alone is not a quality gate. When the signal of one antenna is
+  degraded, the receiver keeps that flag set for several epochs while the carrier-phase
+  solution falls to float or none and the reported accuracy grows to tens of degrees.
+- After one antenna has been obstructed, the return to fixed ambiguities can take minutes
+  under a partially obstructed sky. During that time no `Imu` is published and the
+  `heading_imu` diagnostic warns.
+
+The `heading` diagnostic of the driver shows the carrier-phase state.
 
 ### ubx_file_player_node
 
