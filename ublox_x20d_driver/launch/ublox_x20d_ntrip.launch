@@ -7,45 +7,27 @@
      would otherwise generate its own GGA from NavSatFix, which in ntrip_client 1.4.1 drops
      leading zeros of the decimal minutes and uses local time instead of UTC.
 
-     Pass credentials on the command line; do not store them in files. -->
+     Every setting lives in configuration files: the driver and heading Imu ones, and for
+     the client config/ntrip.yaml (caster, port, mountpoint) plus config/ntrip_credentials.yaml
+     (user name and password). The credentials file is not version-controlled: create it from
+     config/ntrip_credentials.yaml.example. Set publish_gga: true in the driver configuration
+     when the mountpoint needs the rover position. -->
 <launch>
-  <arg name="device" default="/dev/ublox_x20d"/>
   <arg name="config" default="$(find ublox_x20d_driver)/config/x20d_usb.yaml"/>
   <arg name="heading_config" default="$(find ublox_x20d_driver)/config/heading_imu.yaml"/>
-  <arg name="enable_raw_observables" default="false"/>
 
-  <arg name="host"/>
-  <arg name="port" default="2101"/>
-  <arg name="mountpoint"/>
-  <arg name="authenticate" default="true"/>
-  <arg name="username" default=""/>
-  <arg name="password" default=""/>
-  <arg name="ntrip_version" default=""/>
-  <arg name="ssl" default="false"/>
+  <arg name="ntrip_config" default="$(find ublox_x20d_driver)/config/ntrip.yaml"/>
+  <arg name="ntrip_credentials" default="$(find ublox_x20d_driver)/config/ntrip_credentials.yaml"/>
 
   <include file="$(find ublox_x20d_driver)/launch/ublox_x20d.launch">
-    <arg name="device" value="$(arg device)"/>
     <arg name="config" value="$(arg config)"/>
     <arg name="heading_config" value="$(arg heading_config)"/>
-    <arg name="enable_raw_observables" value="$(arg enable_raw_observables)"/>
-    <arg name="publish_gga" value="true"/>
   </include>
 
   <node pkg="ntrip_client" type="ntrip_ros.py" name="ntrip_client" ns="ntrip" output="screen"
         respawn="true" respawn_delay="10">
-    <param name="host" value="$(arg host)"/>
-    <param name="port" value="$(arg port)"/>
-    <param name="mountpoint" value="$(arg mountpoint)"/>
-    <param name="ntrip_version" value="$(arg ntrip_version)"/>
-    <param name="authenticate" value="$(arg authenticate)"/>
-    <param name="username" value="$(arg username)"/>
-    <param name="password" value="$(arg password)"/>
-    <param name="ssl" value="$(arg ssl)"/>
-    <param name="rtcm_message_package" value="rtcm_msgs"/>
-    <param name="rtcm_frame_id" value="gps"/>
-    <param name="reconnect_attempt_max" value="10"/>
-    <param name="reconnect_attempt_wait_seconds" value="5"/>
-    <param name="rtcm_timeout_seconds" value="4"/>
+    <rosparam command="load" file="$(arg ntrip_config)"/>
+    <rosparam command="load" file="$(arg ntrip_credentials)"/>
     <remap from="rtcm" to="/ublox_x20d/rtcm"/>
     <remap from="nmea" to="/ublox_x20d/nmea"/>
   </node>

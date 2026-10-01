@@ -3,7 +3,10 @@
 Procedure to verify a ZED-X20D board, its antennas and this driver together, e.g. on a new
 board, after a firmware update or before a campaign. Each step lists what to do and what
 counts as a pass. Record every run in a bag and, where noted, with raw logging enabled
-(`enable_raw_observables:=true`) so that `scripts/check_recording.py` can analyse it.
+(`enable_raw_observables: true`) so that `scripts/check_recording.py` can analyse it.
+
+Steps that change a setting: edit a copy of `config/x20d_usb.yaml` and start the driver with
+`roslaunch ublox_x20d_driver ublox_x20d.launch config:=<copy>`.
 
 ## Setup
 
@@ -29,14 +32,14 @@ counts as a pass. Record every run in a bag and, where noted, with raw logging e
 
 | Step | Pass |
 |---|---|
-| `roslaunch ublox_x20d_driver ublox_x20d.launch device:=/dev/ublox_x20d` | Log shows `receiver MON-VER: MOD=ZED-X20D FWVER=HDG 2.00 ...` and `user configuration verified on device (N keys)`; no NAK or ERROR lines |
+| `roslaunch ublox_x20d_driver ublox_x20d.launch` | Log shows `receiver MON-VER: MOD=ZED-X20D FWVER=HDG 2.00 ...` and `user configuration verified on device (N keys)`; no NAK or ERROR lines |
 | `rostopic hz` on `nav_pvt`, `nav_hpposllh`, `nav_daheading` | About 1 Hz each; the `link` diagnostic shows at most about 1 NMEA sentence per second (`$GNTHS`) |
-| `rate_meas_ms:=500` for 5 minutes, then back to 1000 | Position topics at 2 Hz; note the `nav_daheading` rate and its share of fixed epochs (HDG 2.00 does not sustain the heading at 2 Hz); the heading re-fixes within seconds after going back |
-| `receiver_heading_offset_deg:=90` against 0, bar still | `rel_pos_heading` changes by +90° (mod 360); `rel_pos_n`/`rel_pos_e` unchanged |
-| `receiver_heading_offset_deg:=200` | The node refuses to start |
+| `rate_meas_ms: 500` for 5 minutes, then back to 1000 | Position topics at 2 Hz; note the `nav_daheading` rate and its share of fixed epochs (HDG 2.00 does not sustain the heading at 2 Hz); the heading re-fixes within seconds after going back |
+| `receiver_heading_offset_deg: 90` against 0, bar still | `rel_pos_heading` changes by +90° (mod 360); `rel_pos_n`/`rel_pos_e` unchanged |
+| `receiver_heading_offset_deg: 200` | The node refuses to start |
 | Restart the driver five times in a row | Verified on the first attempt every time |
 | Ctrl-C | The node exits within 2 s without an abort or core dump |
-| `enable_raw_observables:=true raw_log_content:=rxm_only` | The `.ubx` file contains only `RXM-*` frames |
+| `enable_raw_observables: true` and `raw_log_content: rxm_only` | The `.ubx` file contains only `RXM-*` frames |
 
 ## 3. Parsing
 
@@ -65,7 +68,7 @@ Record 10 minutes static with raw logging and a bag of `/ublox_x20d/*` and
 | Step | Pass |
 |---|---|
 | The static recording without corrections | `~fix` status FIX or SBAS_FIX, horizontal accuracy under 5 m, covariance consistent with it |
-| `ublox_x20d_ntrip.launch` with your caster | The client connects; the `link` diagnostic counts RTCM bytes; `diff_soln` set; `carr_soln` goes 1 → 2; `~fix` GBAS_FIX with horizontal accuracy under 3 cm; note the time to fix |
+| `ublox_x20d_ntrip.launch`, after filling in `config/ntrip.yaml` and creating `config/ntrip_credentials.yaml` (see the README) | The client connects; the `link` diagnostic counts RTCM bytes; `diff_soln` set; `carr_soln` goes 1 → 2; `~fix` GBAS_FIX with horizontal accuracy under 3 cm; note the time to fix |
 | 10 minutes static in RTK fixed | Standard deviation under 2 cm horizontal and 4 cm vertical |
 | The heading checks of section 4 with corrections | Compare the fixed share and heading accuracy with the run without corrections |
 | Interrupt the corrections for a minute | `~fix` degrades to float or FIX without driver errors and recovers when they return |
@@ -76,7 +79,7 @@ Record 10 minutes static with raw logging and a bag of `/ublox_x20d/*` and
 |---|---|
 | Unplug and replug the USB cable while running | The log shows the port lost, reopened and the configuration verified again; topics resume within 5 s of replugging |
 | Start the driver with the receiver unplugged, then plug it in | Retries without flooding the log and configures the receiver when it appears |
-| 2 hours static with `raw_log_rotate_minutes:=10` | Stable memory use, no checksum errors, no iTOW gaps across rotated files |
+| 2 hours static with `raw_log_rotate_minutes: 10` | Stable memory use, no checksum errors, no iTOW gaps across rotated files |
 | Leave the receiver unpowered for more than 12 hours, then start | Note which step of the configuration ladder (a, b, c or d) ends with the configuration verified |
 
 ## 7. Raw data and replay

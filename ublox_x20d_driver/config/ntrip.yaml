@@ -1,0 +1,21 @@
+# ntrip_client configuration for ublox_x20d_ntrip.launch.
+# Credentials do not go here: put them in ntrip_credentials.yaml (not version-controlled),
+# created from ntrip_credentials.yaml.example.
+
+# Caster and mountpoint. Fill in the values given by your correction service.
+host: ""
+port: 2101
+mountpoint: ""
+# true when the caster requires a user name and password (see ntrip_credentials.yaml).
+authenticate: true
+# Empty for NTRIP 1.0; "Ntrip/2.0" for NTRIP 2.0.
+ntrip_version: ""
+ssl: false
+
+# Corrections are published as rtcm_msgs/Message, the type ublox_x20d_node subscribes to.
+rtcm_message_package: rtcm_msgs
+rtcm_frame_id: gps
+
+reconnect_attempt_max: 10
+reconnect_attempt_wait_seconds: 5
+rtcm_timeout_seconds: 4

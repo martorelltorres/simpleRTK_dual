@@ -1,7 +1,12 @@
 # ublox_x20d_node configuration for the ZED-X20D native USB port.
 # Receiver settings are written to the RAM layer only and verified with CFG-VALGET.
 
-device: /dev/ttyACM0
+# Serial device: the symlink created by udev/99-ublox-x20d.rules (/dev/ttyACM* without it).
+device: /dev/ublox_x20d
+# Passed to the port; no effect on the CDC-ACM USB interface.
+baud_rate: 460800
+# Seconds between attempts to reopen a missing or lost port.
+reopen_period: 1.0
 frame_id: gps
 
 # Measurement period and solutions per measurement. The dual-antenna heading is only
@@ -23,6 +28,10 @@ rtcm_input: true
 # Allow a controlled software reset (UBX-CFG-RST, hot start, nothing persistent) when
 # the receiver keeps ignoring the configuration.
 allow_receiver_reset: true
+
+# Publish a GGA sentence per epoch on ~nmea, for NTRIP casters that need the rover position
+# (VRS and nearest-station mountpoints).
+publish_gga: false
 
 # Raw observations (RXM-RAWX, RXM-SFRBX) for PPK, written as .ubx files.
 enable_raw_observables: false

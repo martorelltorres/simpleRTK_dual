@@ -128,7 +128,7 @@ private:
 
   bool load_parameters()
   {
-    pnh_.param<std::string>("device", device_, "/dev/ttyACM0");
+    pnh_.param<std::string>("device", device_, "/dev/ublox_x20d");
     pnh_.param("baud_rate", baud_rate_, 460800);
     pnh_.param<std::string>("frame_id", frame_id_, "gps");
     pnh_.param("reopen_period", reopen_period_s_, 1.0);

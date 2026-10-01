@@ -5,3 +5,6 @@ ublox2rinex/
 
 __pycache__/
 *.pyc
+
+# Local NTRIP credentials (see ublox_x20d_driver/config/ntrip_credentials.yaml.example)
+ublox_x20d_driver/config/ntrip_credentials.yaml

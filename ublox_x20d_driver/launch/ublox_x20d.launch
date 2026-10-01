@@ -1,15 +1,11 @@
+<!-- Driver and heading Imu. Every setting lives in the two configuration files; the
+     arguments only select which files to load. -->
 <launch>
-  <arg name="device" default="/dev/ttyACM0"/>
   <arg name="config" default="$(find ublox_x20d_driver)/config/x20d_usb.yaml"/>
   <arg name="heading_config" default="$(find ublox_x20d_driver)/config/heading_imu.yaml"/>
-  <arg name="enable_raw_observables" default="false"/>
-  <arg name="publish_gga" default="false"/>
 
   <node pkg="ublox_x20d_driver" type="ublox_x20d_node" name="ublox_x20d" output="screen" respawn="true" respawn_delay="5">
     <rosparam command="load" file="$(arg config)"/>
-    <param name="device" value="$(arg device)"/>
-    <param name="enable_raw_observables" value="$(arg enable_raw_observables)"/>
-    <param name="publish_gga" value="$(arg publish_gga)"/>
   </node>
 
   <node pkg="ublox_x20d_driver" type="heading_imu_node" name="heading_imu" output="screen" respawn="true">

@@ -77,14 +77,16 @@ output with a gyroscope.
 cd ~/differential_gps_ws
 catkin build
 source devel/setup.bash
-roslaunch ublox_x20d_driver ublox_x20d.launch device:=/dev/ublox_x20d
+roslaunch ublox_x20d_driver ublox_x20d.launch
 ```
 
-This starts both nodes with `config/x20d_usb.yaml` and `config/heading_imu.yaml`. To also
-record raw observations:
+This starts both nodes with `config/x20d_usb.yaml` and `config/heading_imu.yaml`. Every
+setting lives in these files, including the serial device (`/dev/ublox_x20d`, created by
+the udev rule) and raw logging (`enable_raw_observables`). To use other settings, edit the
+files or start from copies of them:
 
 ```bash
-roslaunch ublox_x20d_driver ublox_x20d.launch device:=/dev/ublox_x20d enable_raw_observables:=true
+roslaunch ublox_x20d_driver ublox_x20d.launch config:=/path/to/x20d.yaml heading_config:=/path/to/heading.yaml
 ```
 
 A healthy start logs `receiver MON-VER: MOD=ZED-X20D FWVER=HDG 2.00 ...` followed by
@@ -132,7 +134,7 @@ and read back; nothing is written to flash or battery-backed RAM.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `device` | `/dev/ttyACM0` | Serial device; `/dev/ublox_x20d` with the udev rule installed |
+| `device` | `/dev/ublox_x20d` | Serial device: the symlink created by the udev rule, or `/dev/ttyACM*` without it |
 | `baud_rate` | `460800` | Passed to the port; has no effect on the CDC-ACM USB interface |
 | `frame_id` | `gps` | `frame_id` of every published message |
 | `reopen_period` | `1.0` | Seconds between attempts to (re)open the port |
@@ -251,22 +253,38 @@ pacing them by their GPS time of week. Nothing is sent to any device.
 The driver owns the serial port, so corrections reach the receiver through it: anything
 published on `/ublox_x20d/rtcm` (`rtcm_msgs/Message`) is written to the receiver as is.
 `launch/ublox_x20d_ntrip.launch` adds the NTRIP client of the `ntrip_client` package
-(`sudo apt install ros-noetic-ntrip-client ros-noetic-rtcm-msgs`) and connects it:
+(`sudo apt install ros-noetic-ntrip-client ros-noetic-rtcm-msgs`) and connects it. Its
+settings come from two files in `config/`:
+
+- `ntrip.yaml`: caster `host`, `port`, `mountpoint`, whether it `authenticate`s, the NTRIP
+  version and the reconnection settings. Fill in the values of your correction service.
+- `ntrip_credentials.yaml`: `username` and `password`. **This file is not in the
+  repository and you must create it** before starting the launch file, from the template:
+
+  ```bash
+  cd $(rospack find ublox_x20d_driver)/config
+  cp ntrip_credentials.yaml.example ntrip_credentials.yaml
+  # edit ntrip_credentials.yaml
+  ```
+
+  It is listed in `.gitignore` so that credentials are never committed. If the caster does
+  not authenticate, leave both values empty and set `authenticate: false` in `ntrip.yaml`.
+
+Then:
 
 ```bash
-roslaunch ublox_x20d_driver ublox_x20d_ntrip.launch device:=/dev/ublox_x20d \
-  host:=caster.example.org port:=2101 mountpoint:=MOUNT username:=USER password:=PASS
+roslaunch ublox_x20d_driver ublox_x20d_ntrip.launch
 ```
 
-It enables `publish_gga`, so the caster receives the rover position once per second, as
-VRS and nearest-station mountpoints require. The GGA sentence is built from `NAV-PVT`
+Set `publish_gga: true` in the driver configuration when the mountpoint needs the rover
+position, as VRS and nearest-station mountpoints do: the caster then receives it once per
+second. The GGA sentence is built from `NAV-PVT`
 (PDOP goes in the HDOP field, since `NAV-PVT` carries no HDOP) and is only sent with a
 valid position. The client runs in the `ntrip` namespace so that its own `fix` input stays
 unconnected: `ntrip_client` 1.4.1 would build a GGA from `NavSatFix` that drops leading zeros
 of the decimal minutes and uses local time instead of UTC.
 
-Pass credentials on the command line rather than storing them in files. With corrections,
-the `link` diagnostic counts the forwarded RTCM bytes, `nav_pvt` shows `diff_soln` and
+With corrections, the `link` diagnostic counts the forwarded RTCM bytes, `nav_pvt` shows `diff_soln` and
 `carr_soln` 1 (float) then 2 (fixed), and `~fix` reports `STATUS_GBAS_FIX`.
 
 ## Frames and conventions
@@ -334,7 +352,7 @@ roslaunch ublox_x20d_driver replay_bag.launch bag:=/path/to/recording.bag
 
 `scripts/check_recording.py` compares what the driver published with the raw frames it
 logged at the same time. Record the driver topics while raw logging is on
-(`enable_raw_observables:=true`, `raw_log_content: all`), then:
+(`enable_raw_observables: true`, `raw_log_content: all`), then:
 
 ```bash
 pip install --user pyubx2
