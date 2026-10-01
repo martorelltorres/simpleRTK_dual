@@ -220,6 +220,9 @@ downstream filter can cope with gross errors:
 
 - With float ambiguities the heading can be off by tens of degrees while the receiver
   reports a heading accuracy of a few degrees or less.
+- With float ambiguities the reported baseline can also be wrong by metres, mostly in its
+  vertical component. Set `expected_baseline_length_m` to the measured antenna distance so
+  that such epochs are dropped even when `publish_degraded` is enabled.
 - `relPosHeadingValid` alone is not a quality gate. When the signal of one antenna is
   degraded, the receiver keeps that flag set for several epochs while the carrier-phase
   solution falls to float or none and the reported accuracy grows to tens of degrees.

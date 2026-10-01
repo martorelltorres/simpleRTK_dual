@@ -17,6 +17,7 @@ import importlib.util
 import os
 import shutil
 import tempfile
+import types
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -49,7 +50,8 @@ class CheckRecordingTest(unittest.TestCase):
     def test_wrong_receiver_offset_fails(self):
         report, status = self.run_check('--receiver-offset-deg', '5')
         self.assertEqual(status, 1)
-        self.assertEqual(report.failures['heading vs baseline vector'], 9)
+        # Nine epochs; the one without relPosHeadingValid has no heading to compare.
+        self.assertEqual(report.failures['heading vs baseline vector'], 8)
 
     def test_published_message_without_frame_fails(self):
         # Keep only the first half of the raw stream: later published messages have no frame.
@@ -65,6 +67,32 @@ class CheckRecordingTest(unittest.TestCase):
             self.assertGreater(report.failures['published without a frame'], 0)
         finally:
             shutil.rmtree(tmp)
+
+
+def daheading(n, e, length, heading_deg, heading_valid=True):
+    return types.SimpleNamespace(rel_pos_n=n, rel_pos_e=e, rel_pos_length=length,
+                                 rel_pos_heading=int(round(heading_deg * 1e5)),
+                                 rel_pos_valid=True, rel_pos_heading_valid=heading_valid)
+
+
+class HeadingVectorMismatchTest(unittest.TestCase):
+    def test_invalid_heading_is_not_compared(self):
+        # The receiver zeroes relPosHeading when relPosHeadingValid is clear.
+        self.assertIsNone(check_recording.heading_vector_mismatch(daheading(76, -650, 6053, 0.0, False), 0.0))
+
+    def test_tolerance_uses_the_horizontal_baseline(self):
+        # Float epoch: 0.82 m horizontal baseline, 6.45 m reported length (vertical error).
+        diff, tol, vector = check_recording.heading_vector_mismatch(daheading(310, -765, 6454, 292.0936), 0.0)
+        self.assertAlmostEqual(vector, -67.941, places=3)
+        self.assertLess(diff, tol)
+
+    def test_wrong_heading_is_detected(self):
+        diff, tol, _ = check_recording.heading_vector_mismatch(daheading(310, -765, 6454, 292.6), 0.0)
+        self.assertGreater(diff, tol)
+
+    def test_receiver_offset_is_removed(self):
+        diff, tol, _ = check_recording.heading_vector_mismatch(daheading(-1074, -219, 5158, 191.5606 + 90.0), 90.0)
+        self.assertLess(diff, tol)
 
 
 if __name__ == '__main__':

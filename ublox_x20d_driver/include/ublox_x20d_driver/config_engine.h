@@ -714,7 +714,6 @@ private:
     ready_since_ = now;
     last_nav_ = now;
     have_last_nav_ = true;
-    nmea_window_closed_at_ = TimePoint();
   }
   void fail(const std::string & reason, TimePoint now, std::vector<Action> * out = nullptr)
   {
@@ -805,7 +804,9 @@ private:
     const double nav_window = std::max(p_.nav_watchdog_s, 3.0 * nav_period_s_);
     const bool nav_silent = nav_msgout_enabled_ && have_last_nav_ &&
       seconds(now - last_nav_) > nav_window;
-    const bool nmea_leaking = nmea_disabled_ && nmea_window_closed_at_ > ready_since_ &&
+    // Only a window that started after READY counts: before that the receiver may still
+    // have been streaming its default NMEA set.
+    const bool nmea_leaking = nmea_disabled_ && nmea_rate_window_start_ >= ready_since_ &&
       nmea_rate_ > p_.nmea_watchdog_per_s;
     if (nav_silent) {
       why = "no UBX-NAV message for " + fmt(seconds(now - last_nav_)) + " s";
@@ -834,7 +835,7 @@ private:
     const double elapsed = seconds(now - nmea_window_start_);
     if (elapsed < p_.nmea_summary_period_s) {return;}
     nmea_rate_ = elapsed > 0.0 ? static_cast<double>(nmea_count_) / elapsed : 0.0;
-    nmea_window_closed_at_ = now;
+    nmea_rate_window_start_ = nmea_window_start_;
     if (nmea_count_ > 0) {
       log(
         LogLevel::INFO, "nmea: " + std::to_string(nmea_count_) + " sentences in " +
@@ -890,7 +891,7 @@ private:
   size_t nmea_count_ = 0;
   std::string nmea_last_;
   TimePoint nmea_window_start_;
-  TimePoint nmea_window_closed_at_;
+  TimePoint nmea_rate_window_start_;  // start of the window nmea_rate_ was measured over
   double nmea_rate_ = 0.0;
 
   std::vector<Action> pending_;

@@ -93,6 +93,7 @@ public:
       ros::shutdown();
       return;
     }
+    configured_ = true;
 
     nav_publisher_.reset(new NavPublisher(pnh_, frame_id_, publish_gga_));
     if (rtcm_input_)
@@ -114,6 +115,12 @@ public:
   ~UbloxX20dNode()
   {
     transport_.close();
+  }
+
+  // False when the parameters were rejected; the node has then shut down.
+  bool configured() const
+  {
+    return configured_;
   }
 
 private:
@@ -747,6 +754,7 @@ private:
   SteadyClock::time_point link_window_start_;
   uint64_t heading_prev_count_ = 0;
   SteadyClock::time_point heading_window_start_;
+  bool configured_ = false;
 };
 
 }  // namespace ublox_x20d_driver
@@ -757,6 +765,10 @@ int main(int argc, char** argv)
   ros::NodeHandle nh;
   ros::NodeHandle pnh("~");
   ublox_x20d_driver::UbloxX20dNode node(nh, pnh);
+  if (!node.configured())
+  {
+    return 1;
+  }
   ros::spin();
   return 0;
 }

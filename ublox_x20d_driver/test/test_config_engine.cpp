@@ -516,6 +516,42 @@ TEST(ConfigEngine, nmea_leak_at_one_per_second_is_tolerated_and_summarised) {
   EXPECT_EQ(f.engine.state(), State::READY);
 }
 
+TEST(ConfigEngine, nmea_before_ready_does_not_trip_the_watchdog) {
+  // After power-up the receiver streams its default NMEA set until the configuration is
+  // applied. Those sentences fall in a summary window that closes after READY; they must
+  // not be read as NMEA still streaming with NMEA output disabled.
+  Fixture f;
+  f.engine.start(f.info(), f.now);
+  f.tick();
+  for (int i = 0; i < 10; i++) {
+    f.advance(0.05);
+    f.engine.on_nmea(2, "$GNGSV,...", f.now);
+    f.tick();
+  }
+  f.engine.on_mon_ver(true, kMonVer, f.now);
+  auto acts = f.tick();
+  const Action * vs = Fixture::find(acts, ActionType::SEND_VALSET);
+  ASSERT_TRUE(vs != nullptr);
+  f.engine.on_valset_sent(f.expected_for(vs->keys), f.now);
+  f.engine.on_nmea(10, "$GNGSV,...", f.now);
+  Action vg = f.ack_to_verify();
+  EXPECT_TRUE(f.engine.on_valget_response(f.reply(vg.keys, true), f.now));
+  f.tick();
+  ASSERT_EQ(f.engine.state(), State::READY);
+
+  for (int i = 0; i < 240; i++) {
+    f.advance(0.05);
+    if (i % 20 == 0) {
+      f.engine.on_nav_frame(f.now);
+      f.engine.on_nmea(1, "$GNTHS,64.25,A", f.now);
+    }
+    acts = f.tick();
+    EXPECT_FALSE(Fixture::has_log(acts, LogLevel::WARN, "NMEA still streaming"));
+    EXPECT_EQ(Fixture::count(acts, ActionType::SEND_VALGET_VERIFY), 0);
+  }
+  EXPECT_EQ(f.engine.state(), State::READY);
+}
+
 TEST(ConfigEngine, port_loss_mid_ladder_resets_state) {
   Fixture f;
   Action vs = f.start_to_valset();

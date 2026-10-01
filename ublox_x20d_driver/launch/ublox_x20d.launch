@@ -5,7 +5,7 @@
   <arg name="enable_raw_observables" default="false"/>
   <arg name="publish_gga" default="false"/>
 
-  <node pkg="ublox_x20d_driver" type="ublox_x20d_node" name="ublox_x20d" output="screen" respawn="true">
+  <node pkg="ublox_x20d_driver" type="ublox_x20d_node" name="ublox_x20d" output="screen" respawn="true" respawn_delay="5">
     <rosparam command="load" file="$(arg config)"/>
     <param name="device" value="$(arg device)"/>
     <param name="enable_raw_observables" value="$(arg enable_raw_observables)"/>

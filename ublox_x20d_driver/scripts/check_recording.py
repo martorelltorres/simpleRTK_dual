@@ -72,6 +72,23 @@ def yaw_pitch(q):
     return yaw, pitch
 
 
+def heading_vector_mismatch(m, receiver_offset_deg):
+    """Difference between the reported heading and the direction of the baseline vector.
+
+    Returns None when the epoch carries no heading to compare (heading not valid, or no
+    horizontal baseline). The tolerance follows from the 1 mm resolution of relPosN/E across
+    the horizontal baseline, which can be much shorter than relPosLength.
+    Returns (difference_deg, tolerance_deg, vector_deg) otherwise.
+    """
+    horizontal = math.hypot(m.rel_pos_n, m.rel_pos_e)
+    if not m.rel_pos_valid or not m.rel_pos_heading_valid or horizontal <= 0:
+        return None
+    heading = m.rel_pos_heading * 1e-5 - receiver_offset_deg
+    vector = math.degrees(math.atan2(m.rel_pos_e, m.rel_pos_n))
+    tol = math.degrees(1.0 / horizontal) + 0.01
+    return abs(wrap_deg(heading - vector)), tol, vector
+
+
 def stamp_key(header):
     return (header.stamp.secs, header.stamp.nsecs)
 
@@ -277,12 +294,10 @@ def check_consistency(report, msgs, args):
         if not m.rel_pos_valid or m.rel_pos_length <= 0:
             continue
         checked += 1
-        heading = m.rel_pos_heading * 1e-5 - args.receiver_offset_deg
-        vector = math.degrees(math.atan2(m.rel_pos_e, m.rel_pos_n))
-        tol = math.degrees(1.0 / m.rel_pos_length) + 0.01  # 1 mm across the baseline
-        if abs(wrap_deg(heading - vector)) > tol:
+        mismatch = heading_vector_mismatch(m, args.receiver_offset_deg)
+        if mismatch is not None and mismatch[0] > mismatch[1]:
             report.fail('heading vs baseline vector', 'iTOW %d: heading %.3f, atan2(E, N) %.3f deg' %
-                        (m.itow, heading, vector))
+                        (m.itow, m.rel_pos_heading * 1e-5 - args.receiver_offset_deg, mismatch[2]))
         norm = math.sqrt(m.rel_pos_n ** 2 + m.rel_pos_e ** 2 + m.rel_pos_d ** 2)
         if abs(norm - m.rel_pos_length) > 1.5:
             report.fail('baseline length vs vector norm', 'iTOW %d: length %d, norm %.1f mm' %
