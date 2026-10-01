@@ -1,0 +1,5 @@
+# u-blox ZED-X20D native USB (CDC-ACM), e.g. the POWER+GPS port of the ArduSimple
+# simpleRTK4 Dual. Creates /dev/ublox_x20d and keeps ModemManager away from the port;
+# without ID_MM_DEVICE_IGNORE ModemManager probes /dev/ttyACM* and the driver cannot
+# open it.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01ab", SYMLINK+="ublox_x20d", MODE="0660", GROUP="dialout", ENV{ID_MM_DEVICE_IGNORE}="1"

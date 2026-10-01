@@ -1,0 +1,32 @@
+# heading_imu_node configuration.
+
+# Drop epochs the receiver does not mark as a valid fix / valid heading.
+require_gnss_fix_ok: true
+require_rel_pos_heading_valid: true
+
+# Minimum carrier phase solution: 0 any, 1 float, 2 fixed ambiguities.
+min_carr_soln: 2
+# Below min_carr_soln, publish anyway with the orientation covariance multiplied by
+# degraded_covariance_factor instead of dropping the epoch.
+publish_degraded: false
+degraded_covariance_factor: 100.0
+
+# Expected GPS1-GPS2 distance, metres (0 disables the check). An epoch whose measured
+# baseline differs by more than the tolerance is reported and, if requested, dropped.
+expected_baseline_length_m: 0.0
+baseline_length_tolerance_m: 0.05
+drop_on_baseline_mismatch: true
+
+# Pitch derived from the baseline vector; only meaningful with the antennas on the
+# vehicle's longitudinal axis. false publishes a yaw-only orientation.
+publish_pitch: true
+
+# Software heading offset, degrees. Leave at 0 and use receiver_heading_offset_deg of
+# ublox_x20d_node instead.
+heading_offset_deg: 0.0
+
+min_heading_std_dev_rad: 0.001
+min_pitch_std_dev_rad: 0.001
+
+# Empty keeps the frame_id of the incoming nav_daheading.
+frame_id: ""

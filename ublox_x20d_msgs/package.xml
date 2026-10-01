@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>ublox_x20d_msgs</name>
+  <version>0.1.0</version>
+  <description>
+    Raw UBX message definitions for the u-blox ZED-X20D dual-antenna GNSS module
+    (NAV-DAHEADING, NAV-PVT, NAV-HPPOSLLH).
+  </description>
+
+  <maintainer email="antoni.martorell@uib.es">Antoni Martorell</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <build_depend>message_generation</build_depend>
+  <build_depend>std_msgs</build_depend>
+
+  <exec_depend>message_runtime</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+</package>

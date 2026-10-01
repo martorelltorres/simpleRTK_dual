@@ -1,0 +1,9 @@
+<launch>
+  <include file="$(find ublox_x20d_driver)/launch/replay_bag.launch">
+    <arg name="bag" value="$(find ublox_x20d_driver)/test/data/nav_daheading_sample.bag"/>
+    <arg name="delay" value="3.0"/>
+  </include>
+  <test test-name="replay_bag" pkg="ublox_x20d_driver" type="replay_checker.py" time-limit="60.0">
+    <param name="check_driver_topics" value="false"/>
+  </test>
+</launch>

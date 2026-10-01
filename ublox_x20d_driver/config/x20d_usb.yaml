@@ -1,0 +1,32 @@
+# ublox_x20d_node configuration for the ZED-X20D native USB port.
+# Receiver settings are written to the RAM layer only and verified with CFG-VALGET.
+
+device: /dev/ttyACM0
+frame_id: gps
+
+# Measurement period and solutions per measurement. The dual-antenna heading is only
+# resolved at 1-2 Hz on HDG 2.00 firmware: keep rate_meas_ms at 500 or above.
+rate_meas_ms: 1000
+rate_nav: 1
+
+# CFG_NAVSPG_DYNMODEL (5 = sea).
+dyn_model: 5
+
+# CFG_NAVSPG_DAHEADING_OFFSET, degrees, applied by the receiver to relPosHeading.
+# 0 when GPS1 (primary) is aft and GPS2 (secondary) forward on the vehicle centre line.
+receiver_heading_offset_deg: 0.0
+
+# USB protocols: UBX always; NMEA output off; RTCM3 input on for corrections.
+nmea_output: false
+rtcm_input: true
+
+# Allow a controlled software reset (UBX-CFG-RST, hot start, nothing persistent) when
+# the receiver keeps ignoring the configuration.
+allow_receiver_reset: true
+
+# Raw observations (RXM-RAWX, RXM-SFRBX) for PPK, written as .ubx files.
+enable_raw_observables: false
+raw_log_dir: ~/.ros/ubx
+raw_log_prefix: x20d
+raw_log_rotate_minutes: 60
+raw_log_content: all   # all | rxm_only

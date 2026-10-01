@@ -1,0 +1,7 @@
+# Third-party packages kept in the workspace for reference only
+reference/
+ublox_driver/
+ublox2rinex/
+
+__pycache__/
+*.pyc
