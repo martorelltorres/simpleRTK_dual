@@ -81,7 +81,8 @@ int main(int argc, char** argv)
            static_cast<unsigned long long>(stats.nmea_sentences),
            static_cast<unsigned long long>(stats.checksum_errors));
 
-  NavPublisher publisher(pnh, frame_id, publish_gga);
+  // Raw observables are published whenever the file contains them.
+  NavPublisher publisher(pnh, frame_id, publish_gga, true);
   ros::Duration(start_delay).sleep();
 
   do
@@ -105,9 +106,14 @@ int main(int argc, char** argv)
         have_itow = true;
         last_itow = itow;
       }
-      if (publisher.handle(frame, ros::Time::now()))
+      const ros::Time now = ros::Time::now();
+      if (publisher.handle(frame, now))
       {
         ++published;
+      }
+      else
+      {
+        publisher.handle_raw(frame, now);
       }
     }
     ROS_INFO("replayed %zu NAV frames", published);

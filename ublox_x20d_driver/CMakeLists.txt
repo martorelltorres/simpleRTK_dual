@@ -58,7 +58,12 @@ install(DIRECTORY config launch udev
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
-catkin_install_python(PROGRAMS scripts/check_recording.py scripts/make_test_ubx.py
+catkin_install_python(PROGRAMS scripts/check_recording.py scripts/make_test_ubx.py scripts/bag_to_ubx.py
+  scripts/ppk_process.py scripts/ppk_fuse.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+# Module imported by the scripts above from their own directory.
+install(FILES scripts/ubx_raw.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
@@ -76,6 +81,8 @@ if(CATKIN_ENABLE_TESTING)
   add_rostest(test/replay_ubx.test)
   add_rostest(test/replay_bag.test)
   catkin_add_nosetests(test/test_check_recording.py)
+  catkin_add_nosetests(test/test_ubx_raw.py)
+  catkin_add_nosetests(test/test_ppk_fuse.py)
 
   catkin_add_gtest(test_heading_conversion test/test_heading_conversion.cpp)
   catkin_add_gtest(test_ubx_framer test/test_ubx_framer.cpp)

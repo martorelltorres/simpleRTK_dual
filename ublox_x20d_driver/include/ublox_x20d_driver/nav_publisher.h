@@ -49,11 +49,17 @@ public:
     uint64_t daheading_count = 0;
   };
 
-  NavPublisher(ros::NodeHandle& pnh, const std::string& frame_id, bool publish_gga = false);
+  // With publish_raw, ~rxm_rawx and ~rxm_sfrbx are advertised and handle_raw() publishes them.
+  NavPublisher(ros::NodeHandle& pnh, const std::string& frame_id, bool publish_gga = false,
+               bool publish_raw = false);
 
   // Publishes the frame if it is NAV-DAHEADING, NAV-PVT or NAV-HPPOSLLH, stamped with
   // `stamp`. Returns true for those three messages, whether or not the payload parsed.
   bool handle(const ubx::Frame& frame, const ros::Time& stamp);
+
+  // Publishes the frame if it is RXM-RAWX or RXM-SFRBX and raw publishing is enabled.
+  // Returns true for those two messages, whether or not the payload parsed.
+  bool handle_raw(const ubx::Frame& frame, const ros::Time& stamp);
 
   Snapshot snapshot() const;
 
@@ -62,6 +68,8 @@ private:
   void handle_daheading(const ubx::Frame& frame);
   void handle_pvt(const ubx::Frame& frame);
   void handle_hpposllh(const ubx::Frame& frame);
+  void handle_rawx(const ubx::Frame& frame);
+  void handle_sfrbx(const ubx::Frame& frame);
   void publish_fix_if_paired();
 
   std::string frame_id_;
@@ -72,6 +80,9 @@ private:
   ros::Publisher hpposllh_pub_;
   ros::Publisher daheading_pub_;
   ros::Publisher nmea_pub_;  // only advertised with publish_gga
+  bool publish_raw_ = false;
+  ros::Publisher rawx_pub_;   // only advertised with publish_raw
+  ros::Publisher sfrbx_pub_;  // only advertised with publish_raw
   bool pvt_length_warned_ = false;
   bool hpposllh_version_warned_ = false;
 

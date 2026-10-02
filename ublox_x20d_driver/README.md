@@ -3,12 +3,13 @@
 ROS Noetic driver for the u-blox **ZED-X20D** dual-antenna GNSS module, as fitted on the
 ArduSimple **simpleRTK4 Dual**. It provides:
 
-- RTK position as `sensor_msgs/NavSatFix` and velocity as `geometry_msgs/TwistWithCovarianceStamped`,
-  with RTCM corrections forwarded from a ROS topic (e.g. an NTRIP client);
+- position as `sensor_msgs/NavSatFix` and velocity as `geometry_msgs/TwistWithCovarianceStamped`,
+  optionally with RTCM corrections forwarded from a ROS topic (e.g. an NTRIP client);
 - the dual-antenna heading computed by the module (`UBX-NAV-DAHEADING`) as raw messages and
   as a `sensor_msgs/Imu` orientation;
-- logging of raw observations (`RXM-RAWX`, `RXM-SFRBX`) to `.ubx` files for PPK
-  post-processing with RTKLIB;
+- raw observations (`RXM-RAWX`, `RXM-SFRBX`) logged to `.ubx` files and published as ROS
+  messages, and tools to post-process them with RTKLIB (PPK) and fuse the result with the
+  live solution;
 - replay of recorded `.ubx` files and bags without hardware, and a tool that checks a
   recording against its raw frames.
 
@@ -109,6 +110,8 @@ Opens the serial port, configures the receiver and publishes its navigation outp
 | `~nav_daheading` | `ublox_x20d_msgs/NavDAHeading` | Every parsed `NAV-DAHEADING` frame, valid or not |
 | `~nav_pvt` | `ublox_x20d_msgs/NavPVT` | Every parsed `NAV-PVT` frame |
 | `~nav_hpposllh` | `ublox_x20d_msgs/NavHPPosLLH` | Every parsed `NAV-HPPOSLLH` frame |
+| `~rxm_rawx` | `ublox_x20d_msgs/RxmRawx` | With `enable_raw_observables`: raw measurements of each epoch (`RXM-RAWX`) |
+| `~rxm_sfrbx` | `ublox_x20d_msgs/RxmSfrbx` | With `enable_raw_observables`: broadcast navigation subframes (`RXM-SFRBX`) |
 | `~nmea` | `nmea_msgs/Sentence` | With `publish_gga`: a `$GPGGA` sentence per epoch with a valid position, without CRLF |
 | `~rtcm` (subscribed) | `rtcm_msgs/Message` | With `rtcm_input`: RTCM corrections, written to the receiver unchanged |
 | `/diagnostics` | `diagnostic_msgs/DiagnosticArray` | `link` (includes forwarded RTCM bytes), `config`, `fix`, `heading`, `raw_log` |
@@ -321,19 +324,98 @@ With corrections, the `link` diagnostic counts the forwarded RTCM bytes, `nav_pv
 ## Raw observations and PPK
 
 With `enable_raw_observables: true` the receiver outputs `RXM-RAWX` and `RXM-SFRBX` at the
-measurement rate, and every UBX frame is written unchanged to
-`<raw_log_dir>/<raw_log_prefix>_YYYYMMDD_HHMMSS.ubx` (UTC time of file creation). Files are
-flushed after every frame and rotated every `raw_log_rotate_minutes`. At 1 Hz this is a few
-kB/s.
+measurement rate. They reach post-processing by two routes:
 
-The files are native UBX streams that RTKLIB converts directly:
+- **`.ubx` files.** Every UBX frame is written unchanged to
+  `<raw_log_dir>/<raw_log_prefix>_YYYYMMDD_HHMMSS.ubx` (UTC time of file creation). Files are
+  flushed after every frame and rotated every `raw_log_rotate_minutes`. At 1 Hz this is
+  about 12 MB per hour.
+- **ROS topics.** `~rxm_rawx` and `~rxm_sfrbx` carry the same frames as messages, so a bag
+  of the mission contains them. `scripts/bag_to_ubx.py` turns such a bag back into a `.ubx`
+  file with identical frames:
+
+  ```bash
+  rosrun ublox_x20d_driver bag_to_ubx.py --bag mission.bag --out mission.ubx
+  ```
+
+The ZED-X20D reports the measurements of one antenna only. Both routes give native UBX
+streams that RTKLIB converts directly:
 
 ```bash
 convbin -r ubx -o x20d.obs -n x20d.nav x20d_20260918_120000.ubx
 ```
 
-Use a recent RTKLIB release. Older versions may not decode every signal of the X20 series
-and drop the ones they do not know.
+Use a recent RTKLIB release. RTKLIB 2.4.3 (the Ubuntu 20.04 package) extracts only the L1
+signals of the ZED-X20D and decodes no Galileo ephemerides, which is not enough for a
+useful multi-frequency solution.
+
+## PPK post-processing
+
+Without corrections at sea, centimetre positions come from post-processing the raw
+observations of the mission against a GNSS reference station:
+
+1. **Record** with `enable_raw_observables: true`: the `.ubx` raw log, or a bag with
+   `~rxm_rawx` and `~rxm_sfrbx` (rebuild the `.ubx` with `bag_to_ubx.py`). Also record
+   `~nav_pvt` and `~nav_hpposllh` for step 4.
+2. **Download the reference station data** (RINEX observations, and navigation data if
+   available) covering the mission, from a public GNSS network close to the area of
+   operation, e.g. the hourly 1 s files of the Spanish IGN network (ERGNSS). The shorter the
+   baseline, the better: up to a few tens of kilometres. Networks often distribute
+   Hatanaka-compressed files (`.crx`); decompress them with `crx2rnx` from RNXCMP.
+3. **Process** with RTKLIB through `scripts/ppk_process.py`:
+
+   ```bash
+   rosrun ublox_x20d_driver ppk_process.py --rover ~/.ros/ubx/x20d_*.ubx \
+     --base-obs BASE_07.rnx BASE_08.rnx --base-nav BASE_*_MN.rnx \
+     --antex igs20.atx --out mission.pos
+   ```
+
+   The options are in `config/ppk_rtklib.conf` (kinematic, forward and backward combined,
+   GPS + GLONASS + Galileo + BeiDou, L1 + L2 + L5). The reference station is set there with
+   the coordinates of its station sheet (`ant2-pos1..3`, ETRS89) and the height of its
+   antenna above the mark (`ant2-antdelu`); it is MAL1 of the IGN network (Palma de
+   Mallorca), replace those values for another station. The PPK solution is in the frame of
+   the station coordinates. `--antex` gives the antenna calibrations (e.g. the IGS file
+   `igs20.atx`); without it the phase centre offsets of the base antenna are not applied
+   and heights are biased by about 0.1 m. Several base files (e.g. hourly) are processed
+   as one.
+
+   RTKLIB 2.4.3 (the Ubuntu 20.04 package) keeps only the L1 signals of the ZED-X20D and
+   the script warns when it is used. RTKLIB-EX 2.5.1 extracts GPS L1/L2/L5, GLONASS L1/L2,
+   Galileo E1/E5a/E6 and BeiDou B2a/B3I (not B1C) and decodes the Galileo ephemerides.
+   Build its command-line tools from source and put them ahead of any other RTKLIB in
+   `PATH` (or pass their directory with `--rtklib-bin`):
+
+   ```bash
+   git clone --depth 1 -b v2.5.1 https://github.com/rtklibexplorer/RTKLIB.git ~/tools/RTKLIB-EX
+   make -C ~/tools/RTKLIB-EX/app/consapp/convbin/gcc
+   make -C ~/tools/RTKLIB-EX/app/consapp/rnx2rtkp/gcc
+   mkdir -p ~/.local/bin
+   ln -s ~/tools/RTKLIB-EX/app/consapp/convbin/gcc/convbin ~/.local/bin/convbin
+   ln -s ~/tools/RTKLIB-EX/app/consapp/rnx2rtkp/gcc/rnx2rtkp ~/.local/bin/rnx2rtkp
+   sudo apt remove rtklib   # optional: the 2.4.3 package is no longer needed
+   ```
+4. **Fuse** the PPK solution with the GNSS output of the driver through
+   `scripts/ppk_fuse.py`:
+
+   ```bash
+   rosrun ublox_x20d_driver ppk_fuse.py --bag mission.bag --pos mission.pos \
+     --out mission_ppk.bag --csv mission_ppk.csv
+   ```
+
+   Epochs are matched by GPS time (`NAV-PVT` iTOW), not by the host clock. A Kalman filter
+   and a Rauch-Tung-Striebel smoother over position, velocity and the bias of the live
+   position combine the PPK positions with the live position (`hAcc`, `vAcc`) and the
+   Doppler velocity (`sAcc`). Fixed and float PPK epochs dominate where available and make
+   the live bias observable; PPK gaps are bridged by the velocity and the bias-corrected
+   live position; measurements outside a chi-square gate are rejected. Settings:
+   `config/ppk_fuse.yaml`.
+
+   The output bag holds the input messages plus `/ublox_x20d/fix_ppk` (one `NavSatFix` per
+   PPK epoch used) and `/ublox_x20d/fix_fused` (one smoothed `NavSatFix` per epoch, full
+   position covariance, `STATUS_GBAS_FIX` where PPK was used). Both are positions of the
+   GPS1 antenna, stamped with the host time of the `NAV-PVT` of the same epoch. The CSV
+   has the fused trajectory with GPS week and time of week.
 
 ## Replay without hardware
 
@@ -357,7 +439,8 @@ logged at the same time. Record the driver topics while raw logging is on
 ```bash
 pip install --user pyubx2
 rosbag record -O run.bag /ublox_x20d/nav_pvt /ublox_x20d/nav_hpposllh \
-  /ublox_x20d/nav_daheading /ublox_x20d/fix /ublox_x20d/vel /heading_imu/imu
+  /ublox_x20d/nav_daheading /ublox_x20d/fix /ublox_x20d/vel /heading_imu/imu \
+  /ublox_x20d/rxm_rawx /ublox_x20d/rxm_sfrbx
 rosrun ublox_x20d_driver check_recording.py --bag run.bag --ubx ~/.ros/ubx/x20d_*.ubx
 ```
 
@@ -365,8 +448,9 @@ It decodes the `.ubx` files with pyubx2, independently of the driver, and compar
 `NAV-PVT`, `NAV-HPPOSLLH` and `NAV-DAHEADING` frame field by field with the published
 message. pyubx2 does not know `NAV-DAHEADING`, so that payload is unpacked from its
 documented layout; checking the heading against the baseline vector and the length
-against its norm covers that layout. It also checks `~fix`, `~vel` and the `Imu` against
-the frames, then prints statistics:
+against its norm covers that layout. Published `RXM-RAWX` and `RXM-SFRBX` messages are
+encoded back to UBX and must equal their frames byte for byte. It also checks `~fix`,
+`~vel` and the `Imu` against the frames, then prints statistics:
 - rates, gaps, payload lengths and versions;
 - carrier-phase solution shares and heading accuracy;
 - baseline length and pitch;

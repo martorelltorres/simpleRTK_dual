@@ -15,7 +15,7 @@
 """Cross-check a recording of ublox_x20d_driver against the raw UBX stream it came from.
 
 Record a bag of the driver topics while the driver logs raw frames
-(enable_raw_observables:=true, raw_log_content:=all), then:
+(enable_raw_observables: true, raw_log_content: all), then:
 
   check_recording.py --bag run.bag --ubx ~/.ros/ubx/x20d_20260918_120000.ubx
 
@@ -25,6 +25,8 @@ field with the message the driver published for it. pyubx2 does not know NAV-DAH
 that payload is unpacked here from its documented layout, so for it the comparison checks
 the driver's publishing path but not the layout itself. The physical consistency checks
 (heading against the baseline vector, length against its norm) cover the layout.
+Published RXM-RAWX and RXM-SFRBX messages are encoded back to UBX (ubx_raw.py) and must
+match their frames byte for byte.
 
 It also checks the published NavSatFix, velocity and Imu against the frames, and prints
 statistics used by the bring-up checklist: rates, gaps, payload lengths and versions,
@@ -39,8 +41,12 @@ import argparse
 import math
 import statistics
 import struct
+import os
 import sys
 from collections import Counter
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ubx_raw  # noqa: E402
 
 DRIVER_NS = '/ublox_x20d'
 IMU_TOPIC = '/heading_imu/imu'
@@ -133,6 +139,8 @@ class UbxData:
         self.pvt = {}
         self.hpposllh = {}
         self.daheading = {}
+        self.rawx = {}           # (week, rcvTow in ms) -> payload bytes
+        self.sfrbx = Counter()   # payload bytes -> count
         self.identities = Counter()
         self.pvt_lengths = Counter()
         self.hpposllh_versions = Counter()
@@ -170,6 +178,11 @@ def read_ubx(paths):
                     if version == 2 and len(payload) >= 60:
                         fields = dict(zip(DAHEADING_FIELDS, struct.unpack_from(DAHEADING_FORMAT, payload)))
                         data.daheading[fields['itow']] = fields
+                elif (cls, mid) == (ubx_raw.RXM_CLASS, ubx_raw.RAWX_ID) and len(payload) >= 10:
+                    rcv_tow, week = struct.unpack_from('<dH', payload)
+                    data.rawx[(week, int(round(rcv_tow * 1000)))] = bytes(payload)
+                elif (cls, mid) == (ubx_raw.RXM_CLASS, ubx_raw.SFRBX_ID):
+                    data.sfrbx[bytes(payload)] += 1
     return data
 
 
@@ -180,7 +193,8 @@ def read_bag(path, ns, imu_topic, from_s, to_s):
     import rosbag
 
     topics = {ns + '/nav_pvt': 'pvt', ns + '/nav_hpposllh': 'hpposllh', ns + '/nav_daheading': 'daheading',
-              ns + '/fix': 'fix', ns + '/vel': 'vel', imu_topic: 'imu'}
+              ns + '/fix': 'fix', ns + '/vel': 'vel', imu_topic: 'imu',
+              ns + '/rxm_rawx': 'rawx', ns + '/rxm_sfrbx': 'sfrbx'}
     msgs = {name: [] for name in topics.values()}
     start = None
     with rosbag.Bag(path) as bag:
@@ -276,6 +290,37 @@ def compare_all(report, ubx, msgs, available):
             for itow in missing:
                 report.fail('frame not published', '%s iTOW %d' % (name, itow))
         report.info('  %-12s %d published, %d matched to frames' % (name, len(published), matched))
+
+
+def compare_raw(report, ubx, msgs, available):
+    """Every published RXM-RAWX and RXM-SFRBX message, encoded back to UBX, must equal a
+    recorded frame. Every RAWX frame within the time span of the published ones must have
+    been published (SFRBX carries no time to bound the span)."""
+    if 'rawx' in available:
+        published = {}
+        for m in msgs['rawx']:
+            key = (m.week, int(round(m.rcv_tow * 1000)))
+            published[key] = m
+            if key not in ubx.rawx:
+                report.fail('published without a frame', 'rawx week %d rcvTow %.3f' % (m.week, m.rcv_tow))
+            elif ubx_raw.rawx_payload(m) != ubx.rawx[key]:
+                report.fail('RXM-RAWX mismatch', 'week %d rcvTow %.3f' % (m.week, m.rcv_tow))
+        if published:
+            lo, hi = min(published), max(published)
+            for key in ubx.rawx:
+                if lo <= key <= hi and key not in published:
+                    report.fail('frame not published', 'rawx week %d rcvTow %.3f' % (key[0], key[1] * 1e-3))
+        report.info('  %-12s %d published, %d frames in the .ubx' % ('rawx', len(published), len(ubx.rawx)))
+    if 'sfrbx' in available:
+        remaining = Counter(ubx.sfrbx)
+        for m in msgs['sfrbx']:
+            payload = ubx_raw.sfrbx_payload(m)
+            if remaining[payload] > 0:
+                remaining[payload] -= 1
+            else:
+                report.fail('RXM-SFRBX without a matching frame', 'gnss %d sv %d' % (m.gnss_id, m.sv_id))
+        report.info('  %-12s %d published, %d frames in the .ubx' %
+                    ('sfrbx', len(msgs['sfrbx']), sum(ubx.sfrbx.values())))
 
 
 # --- consistency of derived outputs -------------------------------------------------------
@@ -484,6 +529,7 @@ def run(args):
 
     report.info('Comparison with the raw frames (pyubx2; NAV-DAHEADING unpacked from its documented layout)')
     compare_all(report, ubx, msgs, available)
+    compare_raw(report, ubx, msgs, available)
     report.info('Consistency of derived outputs')
     pvt_by_itow = check_consistency(report, msgs, args)
     print_statistics(report, ubx, msgs, pvt_by_itow, args)

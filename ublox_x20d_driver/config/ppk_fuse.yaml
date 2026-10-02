@@ -1,0 +1,28 @@
+# scripts/ppk_fuse.py: fusion of a PPK solution (.pos) with the GNSS output of the driver.
+# A Kalman filter and a Rauch-Tung-Striebel smoother over position and velocity in a local
+# east-north-up frame, run forwards and backwards over the whole mission.
+
+# PPK epochs used, by RTKLIB quality: 1 fix, 2 float, 3 sbas, 4 dgps, 5 single.
+ppk_qualities: [1, 2]
+# Floor on the PPK standard deviations (m); RTKLIB can report a few millimetres.
+ppk_min_sd: 0.01
+# Multiplier on the standard deviations of float epochs, which RTKLIB tends to underestimate.
+ppk_float_sd_scale: 3.0
+
+# Live position of the driver (nav_hpposllh), weighted by hAcc/vAcc. Bridges PPK gaps.
+use_live_position: true
+# The live position has a bias of metres that changes slowly; it is estimated as a random
+# walk (m^2/s) from an initial standard deviation (m). PPK makes it observable.
+live_bias_walk: 0.01
+live_bias_sd: 5.0
+# Doppler velocity of the driver (nav_pvt), weighted by sAcc.
+use_doppler_velocity: true
+
+# Random-walk acceleration noise of the motion model (m^2/s^3). Larger values follow
+# manoeuvres more closely; smaller values smooth more.
+accel_noise_horizontal: 0.5
+accel_noise_vertical: 0.1
+
+# Measurements whose normalised innovation exceeds this chi-square value are rejected
+# (16.27 is the 99.9 % quantile with 3 degrees of freedom).
+gate_chi2: 16.27

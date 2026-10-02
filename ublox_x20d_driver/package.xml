@@ -4,7 +4,8 @@
   <version>0.1.0</version>
   <description>
     ROS driver for the u-blox ZED-X20D dual-antenna GNSS module (ArduSimple simpleRTK4 Dual):
-    RTK position, dual-antenna heading as sensor_msgs/Imu and raw observation logging for PPK.
+    position, dual-antenna heading as sensor_msgs/Imu, raw observations for PPK and tools to
+    post-process them and fuse the result with the live solution.
   </description>
 
   <maintainer email="antoni.martorell@uib.es">Antoni Martorell</maintainer>
@@ -24,6 +25,9 @@
   <exec_depend>ntrip_client</exec_depend>
   <exec_depend>rosbag</exec_depend>
   <exec_depend>rospy</exec_depend>
+  <exec_depend>rospkg</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
 
   <test_depend>rostest</test_depend>
 </package>

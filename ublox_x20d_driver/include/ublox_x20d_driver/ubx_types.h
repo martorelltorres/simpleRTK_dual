@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
@@ -375,6 +376,204 @@ inline ParseResult parse_nav_hpposllh(const std::vector<uint8_t>& payload, NavHP
   out->h_acc = read_u4(p + 28);
   out->v_acc = read_u4(p + 32);
   return ParseResult::kOk;
+}
+
+// UBX-RXM-RAWX: a 16-byte header and 32 bytes per measurement. Bytes 14-15 of the header
+// are documented as reserved but carry a value on HDG 2.00 (it advances by 1000 per
+// epoch); they are kept so that encode_rxm_rawx() rebuilds the payload exactly.
+constexpr size_t kRxmRawxHeaderLength = 16;
+constexpr size_t kRxmRawxMeasLength = 32;
+
+struct RawxMeas
+{
+  double pr_mes;      // m
+  double cp_mes;      // cycles
+  float do_mes;       // Hz
+  uint8_t gnss_id;
+  uint8_t sv_id;
+  uint8_t sig_id;
+  uint8_t freq_id;
+  uint16_t locktime;  // ms
+  uint8_t cno;        // dBHz
+  uint8_t pr_stdev;   // bits 3:0, 0.01 * 2^n m
+  uint8_t cp_stdev;   // bits 3:0, 0.004 * n cycles
+  uint8_t do_stdev;   // bits 3:0, 0.002 * 2^n Hz
+  uint8_t trk_stat;   // raw: bit 0 prValid, 1 cpValid, 2 halfCyc, 3 subHalfCyc
+};
+
+struct RxmRawx
+{
+  double rcv_tow;     // s
+  uint16_t week;
+  int8_t leap_s;      // s
+  uint8_t rec_stat;   // raw: bit 0 leapSec, 1 clkReset
+  uint8_t version;
+  uint16_t reserved0;
+  std::vector<RawxMeas> meas;
+};
+
+inline double read_r8(const uint8_t* p)
+{
+  const uint64_t bits = read_u8(p);
+  double value;
+  std::memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+
+inline float read_r4(const uint8_t* p)
+{
+  const uint32_t bits = read_u4(p);
+  float value;
+  std::memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+
+inline void append_r8(std::vector<uint8_t>& out, double value)
+{
+  uint64_t bits;
+  std::memcpy(&bits, &value, sizeof(bits));
+  append_u8(out, bits);
+}
+
+inline void append_r4(std::vector<uint8_t>& out, float value)
+{
+  uint32_t bits;
+  std::memcpy(&bits, &value, sizeof(bits));
+  append_u4(out, bits);
+}
+
+inline ParseResult parse_rxm_rawx(const std::vector<uint8_t>& payload, RxmRawx* out)
+{
+  if (payload.size() < kRxmRawxHeaderLength)
+  {
+    return ParseResult::kTooShort;
+  }
+  const uint8_t* p = payload.data();
+  const uint8_t num_meas = read_u1(p + 11);
+  if (payload.size() < kRxmRawxHeaderLength + kRxmRawxMeasLength * num_meas)
+  {
+    return ParseResult::kTooShort;
+  }
+  out->rcv_tow = read_r8(p);
+  out->week = read_u2(p + 8);
+  out->leap_s = read_i1(p + 10);
+  out->rec_stat = read_u1(p + 12);
+  out->version = read_u1(p + 13);
+  out->reserved0 = read_u2(p + 14);
+  out->meas.resize(num_meas);
+  for (size_t i = 0; i < num_meas; ++i)
+  {
+    const uint8_t* m = p + kRxmRawxHeaderLength + kRxmRawxMeasLength * i;
+    RawxMeas& r = out->meas[i];
+    r.pr_mes = read_r8(m);
+    r.cp_mes = read_r8(m + 8);
+    r.do_mes = read_r4(m + 16);
+    r.gnss_id = read_u1(m + 20);
+    r.sv_id = read_u1(m + 21);
+    r.sig_id = read_u1(m + 22);
+    r.freq_id = read_u1(m + 23);
+    r.locktime = read_u2(m + 24);
+    r.cno = read_u1(m + 26);
+    r.pr_stdev = read_u1(m + 27) & 0x0Fu;
+    r.cp_stdev = read_u1(m + 28) & 0x0Fu;
+    r.do_stdev = read_u1(m + 29) & 0x0Fu;
+    r.trk_stat = read_u1(m + 30);
+  }
+  return ParseResult::kOk;
+}
+
+// Inverse of parse_rxm_rawx(). The reserved byte of each measurement is written as 0.
+inline std::vector<uint8_t> encode_rxm_rawx(const RxmRawx& in)
+{
+  std::vector<uint8_t> out;
+  out.reserve(kRxmRawxHeaderLength + kRxmRawxMeasLength * in.meas.size());
+  append_r8(out, in.rcv_tow);
+  append_u2(out, in.week);
+  append_u1(out, static_cast<uint8_t>(in.leap_s));
+  append_u1(out, static_cast<uint8_t>(in.meas.size()));
+  append_u1(out, in.rec_stat);
+  append_u1(out, in.version);
+  append_u2(out, in.reserved0);
+  for (const RawxMeas& r : in.meas)
+  {
+    append_r8(out, r.pr_mes);
+    append_r8(out, r.cp_mes);
+    append_r4(out, r.do_mes);
+    append_u1(out, r.gnss_id);
+    append_u1(out, r.sv_id);
+    append_u1(out, r.sig_id);
+    append_u1(out, r.freq_id);
+    append_u2(out, r.locktime);
+    append_u1(out, r.cno);
+    append_u1(out, r.pr_stdev);
+    append_u1(out, r.cp_stdev);
+    append_u1(out, r.do_stdev);
+    append_u1(out, r.trk_stat);
+    append_u1(out, 0);
+  }
+  return out;
+}
+
+// UBX-RXM-SFRBX: an 8-byte header and numWords data words. Byte 7 is documented as
+// reserved but is not zero on HDG 2.00; it is kept for an exact rebuild.
+constexpr size_t kRxmSfrbxHeaderLength = 8;
+
+struct RxmSfrbx
+{
+  uint8_t gnss_id;
+  uint8_t sv_id;
+  uint8_t sig_id;
+  uint8_t freq_id;
+  uint8_t chn;
+  uint8_t version;
+  uint8_t reserved0;
+  std::vector<uint32_t> dwrd;
+};
+
+inline ParseResult parse_rxm_sfrbx(const std::vector<uint8_t>& payload, RxmSfrbx* out)
+{
+  if (payload.size() < kRxmSfrbxHeaderLength)
+  {
+    return ParseResult::kTooShort;
+  }
+  const uint8_t* p = payload.data();
+  const uint8_t num_words = read_u1(p + 4);
+  if (payload.size() < kRxmSfrbxHeaderLength + 4u * num_words)
+  {
+    return ParseResult::kTooShort;
+  }
+  out->gnss_id = read_u1(p);
+  out->sv_id = read_u1(p + 1);
+  out->sig_id = read_u1(p + 2);
+  out->freq_id = read_u1(p + 3);
+  out->chn = read_u1(p + 5);
+  out->version = read_u1(p + 6);
+  out->reserved0 = read_u1(p + 7);
+  out->dwrd.resize(num_words);
+  for (size_t i = 0; i < num_words; ++i)
+  {
+    out->dwrd[i] = read_u4(p + kRxmSfrbxHeaderLength + 4 * i);
+  }
+  return ParseResult::kOk;
+}
+
+inline std::vector<uint8_t> encode_rxm_sfrbx(const RxmSfrbx& in)
+{
+  std::vector<uint8_t> out;
+  out.reserve(kRxmSfrbxHeaderLength + 4 * in.dwrd.size());
+  append_u1(out, in.gnss_id);
+  append_u1(out, in.sv_id);
+  append_u1(out, in.sig_id);
+  append_u1(out, in.freq_id);
+  append_u1(out, static_cast<uint8_t>(in.dwrd.size()));
+  append_u1(out, in.chn);
+  append_u1(out, in.version);
+  append_u1(out, in.reserved0);
+  for (uint32_t word : in.dwrd)
+  {
+    append_u4(out, word);
+  }
+  return out;
 }
 
 // iTOW (ms) of a NAV-PVT, NAV-HPPOSLLH or NAV-DAHEADING frame. False for any other frame

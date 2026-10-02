@@ -11,6 +11,9 @@ add_message_files(
   NavDAHeading.msg
   NavHPPosLLH.msg
   NavPVT.msg
+  RawxMeas.msg
+  RxmRawx.msg
+  RxmSfrbx.msg
 )
 
 generate_messages(

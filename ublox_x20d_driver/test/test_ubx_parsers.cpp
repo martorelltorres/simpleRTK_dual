@@ -391,6 +391,128 @@ TEST(MonVer, RejectsShortPayload)
   EXPECT_EQ(parse_mon_ver(Bytes(39, 0), &v), ParseResult::kTooShort);
 }
 
+namespace
+{
+Bytes from_hex(const std::string& hex)
+{
+  Bytes b;
+  for (size_t i = 0; i + 1 < hex.size(); i += 2)
+  {
+    b.push_back(static_cast<uint8_t>(std::stoul(hex.substr(i, 2), nullptr, 16)));
+  }
+  return b;
+}
+
+// RXM-RAWX recorded from a ZED-X20D (HDG 2.00): the real header and its first two
+// measurements, with numMeas set to 2. Expected values decoded independently with pyubx2.
+const Bytes kRawxPayload = from_hex(
+    "dd2406015cd516418609120241021d6d"
+    "4634c81cea477441abc349f68be59341"
+    "2f7ab14400060700f4fb2c0402070700"
+    "32aef0886a5273415190b221b3f49241"
+    "1d5817440009070024361c0507080700");
+
+// RXM-SFRBX recorded from the same receiver (GPS SV 9, 10 words).
+const Bytes kSfrbxPayload = from_hex(
+    "000900000a9b02200986c122d3896d9e3d0064182ed9189d18a334abaf6c550f"
+    "4600f33818dad693b3ea3f004721c815");
+}  // namespace
+
+TEST(RxmRawx, RecordedFrame)
+{
+  RxmRawx r;
+  ASSERT_EQ(parse_rxm_rawx(kRawxPayload, &r), ParseResult::kOk);
+  EXPECT_DOUBLE_EQ(r.rcv_tow, 374103.001);
+  EXPECT_EQ(r.week, 2438);
+  EXPECT_EQ(r.leap_s, 18);
+  EXPECT_EQ(r.rec_stat, 0x41);  // bit 0 leapSec; bit 6 is set on HDG 2.00 but not documented
+  EXPECT_EQ(r.version, 2);
+  EXPECT_EQ(r.reserved0, 27933);
+  ASSERT_EQ(r.meas.size(), 2u);
+
+  const RawxMeas& a = r.meas[0];
+  EXPECT_DOUBLE_EQ(a.pr_mes, 21266081.798877977);
+  EXPECT_DOUBLE_EQ(a.cp_mes, 83452669.57203548);
+  EXPECT_FLOAT_EQ(a.do_mes, 1419.8182373046875f);
+  EXPECT_EQ(a.gnss_id, 0);
+  EXPECT_EQ(a.sv_id, 6);
+  EXPECT_EQ(a.sig_id, 7);
+  EXPECT_EQ(a.freq_id, 0);
+  EXPECT_EQ(a.locktime, 64500);
+  EXPECT_EQ(a.cno, 44);
+  EXPECT_EQ(a.pr_stdev, 4);
+  EXPECT_EQ(a.cp_stdev, 2);
+  EXPECT_EQ(a.do_stdev, 7);
+  EXPECT_EQ(a.trk_stat, 0x07);  // prValid, cpValid, halfCyc
+
+  const RawxMeas& b = r.meas[1];
+  EXPECT_DOUBLE_EQ(b.pr_mes, 20260520.558759876);
+  EXPECT_DOUBLE_EQ(b.cp_mes, 79506632.42437865);
+  EXPECT_FLOAT_EQ(b.do_mes, 605.3767700195312f);
+  EXPECT_EQ(b.sv_id, 9);
+  EXPECT_EQ(b.locktime, 13860);
+  EXPECT_EQ(b.cno, 28);
+  EXPECT_EQ(b.pr_stdev, 5);
+  EXPECT_EQ(b.cp_stdev, 7);
+  EXPECT_EQ(b.do_stdev, 8);
+}
+
+TEST(RxmRawx, EncodeRebuildsTheRecordedPayload)
+{
+  RxmRawx r;
+  ASSERT_EQ(parse_rxm_rawx(kRawxPayload, &r), ParseResult::kOk);
+  EXPECT_EQ(encode_rxm_rawx(r), kRawxPayload);
+}
+
+TEST(RxmRawx, StdevIndexIsTheLowNibble)
+{
+  Bytes p = kRawxPayload;
+  p.at(16 + 27) |= 0xF0;
+  RxmRawx r;
+  ASSERT_EQ(parse_rxm_rawx(p, &r), ParseResult::kOk);
+  EXPECT_EQ(r.meas[0].pr_stdev, 4);
+}
+
+TEST(RxmRawx, LengthHandling)
+{
+  RxmRawx r;
+  EXPECT_EQ(parse_rxm_rawx(Bytes(15, 0), &r), ParseResult::kTooShort);
+  // header announces two measurements but only one is present
+  EXPECT_EQ(parse_rxm_rawx(Bytes(kRawxPayload.begin(), kRawxPayload.end() - 1), &r),
+            ParseResult::kTooShort);
+  // no measurements
+  Bytes empty(kRawxPayload.begin(), kRawxPayload.begin() + 16);
+  empty.at(11) = 0;
+  ASSERT_EQ(parse_rxm_rawx(empty, &r), ParseResult::kOk);
+  EXPECT_TRUE(r.meas.empty());
+  EXPECT_EQ(encode_rxm_rawx(r), empty);
+}
+
+TEST(RxmSfrbx, RecordedFrame)
+{
+  RxmSfrbx s;
+  ASSERT_EQ(parse_rxm_sfrbx(kSfrbxPayload, &s), ParseResult::kOk);
+  EXPECT_EQ(s.gnss_id, 0);
+  EXPECT_EQ(s.sv_id, 9);
+  EXPECT_EQ(s.sig_id, 0);
+  EXPECT_EQ(s.freq_id, 0);
+  EXPECT_EQ(s.chn, 155);
+  EXPECT_EQ(s.version, 2);
+  EXPECT_EQ(s.reserved0, 0x20);
+  ASSERT_EQ(s.dwrd.size(), 10u);
+  EXPECT_EQ(s.dwrd.front(), 0x22c18609u);
+  EXPECT_EQ(s.dwrd.back(), 0x15c82147u);
+  EXPECT_EQ(encode_rxm_sfrbx(s), kSfrbxPayload);
+}
+
+TEST(RxmSfrbx, LengthHandling)
+{
+  RxmSfrbx s;
+  EXPECT_EQ(parse_rxm_sfrbx(Bytes(7, 0), &s), ParseResult::kTooShort);
+  EXPECT_EQ(parse_rxm_sfrbx(Bytes(kSfrbxPayload.begin(), kSfrbxPayload.end() - 1), &s),
+            ParseResult::kTooShort);
+}
+
 int main(int argc, char** argv)
 {
   testing::InitGoogleTest(&argc, argv);

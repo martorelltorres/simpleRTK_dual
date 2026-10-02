@@ -95,7 +95,7 @@ public:
     }
     configured_ = true;
 
-    nav_publisher_.reset(new NavPublisher(pnh_, frame_id_, publish_gga_));
+    nav_publisher_.reset(new NavPublisher(pnh_, frame_id_, publish_gga_, raw_enabled_));
     if (rtcm_input_)
     {
       rtcm_sub_ = pnh_.subscribe("rtcm", 32, &UbloxX20dNode::on_rtcm, this);
@@ -335,6 +335,9 @@ private:
           std::lock_guard<std::mutex> lock(engine_mutex_);
           engine_.on_nav_frame(now);
         }
+        break;
+      case ubx::msg_class::kRxm:
+        nav_publisher_->handle_raw(frame, rx_stamp_);
         break;
       default:
         break;

@@ -23,6 +23,8 @@
 #include <ublox_x20d_msgs/NavDAHeading.h>
 #include <ublox_x20d_msgs/NavHPPosLLH.h>
 #include <ublox_x20d_msgs/NavPVT.h>
+#include <ublox_x20d_msgs/RxmRawx.h>
+#include <ublox_x20d_msgs/RxmSfrbx.h>
 
 #include "ublox_x20d_driver/nav_conversion.h"
 #include "ublox_x20d_driver/nmea_gga.h"
@@ -30,8 +32,9 @@
 namespace ublox_x20d_driver
 {
 
-NavPublisher::NavPublisher(ros::NodeHandle& pnh, const std::string& frame_id, bool publish_gga)
-  : frame_id_(frame_id)
+NavPublisher::NavPublisher(ros::NodeHandle& pnh, const std::string& frame_id, bool publish_gga,
+                           bool publish_raw)
+  : frame_id_(frame_id), publish_raw_(publish_raw)
 {
   fix_pub_ = pnh.advertise<sensor_msgs::NavSatFix>("fix", 10);
   vel_pub_ = pnh.advertise<geometry_msgs::TwistWithCovarianceStamped>("vel", 10);
@@ -41,6 +44,11 @@ NavPublisher::NavPublisher(ros::NodeHandle& pnh, const std::string& frame_id, bo
   if (publish_gga)
   {
     nmea_pub_ = pnh.advertise<nmea_msgs::Sentence>("nmea", 10);
+  }
+  if (publish_raw)
+  {
+    rawx_pub_ = pnh.advertise<ublox_x20d_msgs::RxmRawx>("rxm_rawx", 10);
+    sfrbx_pub_ = pnh.advertise<ublox_x20d_msgs::RxmSfrbx>("rxm_sfrbx", 100);
   }
 }
 
@@ -65,6 +73,98 @@ bool NavPublisher::handle(const ubx::Frame& frame, const ros::Time& stamp)
     default:
       return false;
   }
+}
+
+bool NavPublisher::handle_raw(const ubx::Frame& frame, const ros::Time& stamp)
+{
+  if (frame.msg_class != ubx::msg_class::kRxm)
+  {
+    return false;
+  }
+  switch (frame.msg_id)
+  {
+    case ubx::msg_id::kRxmRawx:
+      if (publish_raw_)
+      {
+        stamp_ = stamp;
+        handle_rawx(frame);
+      }
+      return true;
+    case ubx::msg_id::kRxmSfrbx:
+      if (publish_raw_)
+      {
+        stamp_ = stamp;
+        handle_sfrbx(frame);
+      }
+      return true;
+    default:
+      return false;
+  }
+}
+
+void NavPublisher::handle_rawx(const ubx::Frame& frame)
+{
+  ubx::RxmRawx m;
+  if (ubx::parse_rxm_rawx(frame.payload, &m) != ubx::ParseResult::kOk)
+  {
+    ROS_WARN_THROTTLE(30.0, "RXM-RAWX payload too short (%zu bytes)", frame.payload.size());
+    return;
+  }
+  ublox_x20d_msgs::RxmRawx msg;
+  msg.header = header();
+  msg.rcv_tow = m.rcv_tow;
+  msg.week = m.week;
+  msg.leap_s = m.leap_s;
+  msg.rec_stat = m.rec_stat;
+  msg.leap_sec = (m.rec_stat & 0x01u) != 0;
+  msg.clk_reset = (m.rec_stat & 0x02u) != 0;
+  msg.version = m.version;
+  msg.reserved0 = m.reserved0;
+  msg.meas.resize(m.meas.size());
+  for (size_t i = 0; i < m.meas.size(); ++i)
+  {
+    const ubx::RawxMeas& r = m.meas[i];
+    ublox_x20d_msgs::RawxMeas& out = msg.meas[i];
+    out.pr_mes = r.pr_mes;
+    out.cp_mes = r.cp_mes;
+    out.do_mes = r.do_mes;
+    out.gnss_id = r.gnss_id;
+    out.sv_id = r.sv_id;
+    out.sig_id = r.sig_id;
+    out.freq_id = r.freq_id;
+    out.locktime = r.locktime;
+    out.cno = r.cno;
+    out.pr_stdev = r.pr_stdev;
+    out.cp_stdev = r.cp_stdev;
+    out.do_stdev = r.do_stdev;
+    out.trk_stat = r.trk_stat;
+    out.pr_valid = (r.trk_stat & 0x01u) != 0;
+    out.cp_valid = (r.trk_stat & 0x02u) != 0;
+    out.half_cyc = (r.trk_stat & 0x04u) != 0;
+    out.sub_half_cyc = (r.trk_stat & 0x08u) != 0;
+  }
+  rawx_pub_.publish(msg);
+}
+
+void NavPublisher::handle_sfrbx(const ubx::Frame& frame)
+{
+  ubx::RxmSfrbx m;
+  if (ubx::parse_rxm_sfrbx(frame.payload, &m) != ubx::ParseResult::kOk)
+  {
+    ROS_WARN_THROTTLE(30.0, "RXM-SFRBX payload too short (%zu bytes)", frame.payload.size());
+    return;
+  }
+  ublox_x20d_msgs::RxmSfrbx msg;
+  msg.header = header();
+  msg.gnss_id = m.gnss_id;
+  msg.sv_id = m.sv_id;
+  msg.sig_id = m.sig_id;
+  msg.freq_id = m.freq_id;
+  msg.chn = m.chn;
+  msg.version = m.version;
+  msg.reserved0 = m.reserved0;
+  msg.dwrd = m.dwrd;
+  sfrbx_pub_.publish(msg);
 }
 
 NavPublisher::Snapshot NavPublisher::snapshot() const
