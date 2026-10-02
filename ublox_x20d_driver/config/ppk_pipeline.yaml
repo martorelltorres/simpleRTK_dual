@@ -1,0 +1,26 @@
+# scripts/ppk_pipeline.py: PPK post-processing of a mission in one command.
+# Empty values take the default given in the comment.
+
+# Reference station, by its name in stations_file.
+station: MAL1
+# Reference station catalog (default: config/base_stations.yaml of this package).
+stations_file: ''
+
+# ANTEX file with antenna calibrations, e.g. the IGS file igs20.atx (default: none). Without
+# it the phase centre offsets of the base antenna are not applied and heights are biased by
+# about 0.1 m; check the fixed-solution share with and without it.
+antex: ''
+
+# Directories of the RTKLIB tools (convbin, rnx2rtkp) and of crx2rnx (default: PATH).
+rtklib_bin: ''
+crx2rnx_bin: ''
+
+# Downloaded reference station files are kept here and not downloaded again.
+cache_dir: ~/.ros/ppk_base
+# Seconds added before and after the mission when choosing the hours to download.
+margin_s: 60
+
+# RTKLIB options (default: config/ppk_rtklib.conf) and fusion settings (default:
+# config/ppk_fuse.yaml).
+rtklib_conf: ''
+fuse_config: ''

@@ -1,0 +1,25 @@
+# Reference stations for PPK (scripts/ppk_process.py, scripts/ppk_pipeline.py).
+#
+# networks: where the hourly RINEX files of a station are published. url, obs and nav are
+#   Python format strings; {id} is the station id and {date} the UTC start of the hour.
+# stations: coordinates of the station mark from its station sheet (ETRS89, so the PPK
+#   solution is in ETRS89 too) and the height of the antenna reference point above the
+#   mark. To add a station, copy these values from its sheet.
+
+networks:
+  # Spanish IGN network (ERGNSS), hourly files at 1 s, published once the hour has ended.
+  ign_ergnss:
+    url: "https://datos-geodesia.ign.es/ERGNSS/horario_1s/{date:%Y%m%d}/{date:%H}/"
+    obs: "{id}_R_{date:%Y%j%H}00_01H_01S_MO.crx.gz"
+    nav: "{id}_R_{date:%Y%j%H}00_01H_MN.rnx.gz"
+
+stations:
+  # Palma de Mallorca tide gauge (IERS 13444M002), antenna LEIAR20 LEIM.
+  # Sheet: latitude 39 33' 36.63673" N, longitude 2 38' 14.83584" E, height 53.787 m.
+  MAL1:
+    id: MAL100ESP
+    network: ign_ergnss
+    lat: 39.560176869       # deg
+    lon: 2.637454400        # deg
+    height: 53.787          # m, ellipsoidal
+    antenna_height: 0.0350  # m, mark to antenna reference point

@@ -18,8 +18,9 @@
 
 Runs RTKLIB: convbin turns the rover .ubx files (from the driver's raw log, or rebuilt from
 a bag with bag_to_ubx.py) into RINEX, then rnx2rtkp computes the kinematic solution with
-the options of config/ppk_rtklib.conf. The reference station RINEX files are downloaded
-separately for the time span of the mission, e.g. from a public GNSS network.
+the options of config/ppk_rtklib.conf and the coordinates of the reference station from
+config/base_stations.yaml. The reference station RINEX files cover the time span of the
+mission; ppk_pipeline.py downloads them, or they are downloaded separately.
 
 The output .pos file (GPS time, ellipsoidal height) is the input of ppk_fuse.py.
 """
@@ -74,6 +75,30 @@ def quality_counts(pos_path):
     return counts
 
 
+def load_station(name, stations_file):
+    """Station entry of the catalog (config/base_stations.yaml), plus its network entry."""
+    import yaml
+
+    with open(stations_file) as f:
+        catalog = yaml.safe_load(f)
+    stations = catalog.get('stations') or {}
+    if name not in stations:
+        raise KeyError('station %s not in %s (known: %s)' % (name, stations_file, ', '.join(sorted(stations))))
+    station = dict(stations[name])
+    station['name'] = name
+    station['network'] = dict(catalog['networks'][station['network']], name=station['network'])
+    return station
+
+
+def station_options(station):
+    """RTKLIB options with the position and antenna height of the reference station."""
+    return ('ant2-pos1          =%.9f\n'
+            'ant2-pos2          =%.9f\n'
+            'ant2-pos3          =%.4f\n'
+            'ant2-antdelu       =%.4f\n') % (station['lat'], station['lon'], station['height'],
+                                              station['antenna_height'])
+
+
 def tool(name, bin_dir):
     path = os.path.join(bin_dir, name) if bin_dir else shutil.which(name)
     if not path or not os.access(path, os.X_OK):
@@ -81,17 +106,18 @@ def tool(name, bin_dir):
     return path
 
 
-def run(args):
-    convbin = tool('convbin', args.rtklib_bin)
-    rnx2rtkp = tool('rnx2rtkp', args.rtklib_bin)
+def process(rover, base_obs, base_nav, conf, out, station, antex='', rtklib_bin='', keep_rinex=False):
+    """Runs convbin and rnx2rtkp; returns the epoch count per quality of the .pos written."""
+    convbin = tool('convbin', rtklib_bin)
+    rnx2rtkp = tool('rnx2rtkp', rtklib_bin)
     work = tempfile.mkdtemp(prefix='ppk_')
     try:
         # Rotated raw log files are consecutive parts of one stream.
         rover_ubx = os.path.join(work, 'rover.ubx')
-        with open(rover_ubx, 'wb') as out:
-            for path in args.rover:
+        with open(rover_ubx, 'wb') as dst:
+            for path in rover:
                 with open(path, 'rb') as f:
-                    shutil.copyfileobj(f, out)
+                    shutil.copyfileobj(f, dst)
         rover_obs = os.path.join(work, 'rover.obs')
         rover_nav = os.path.join(work, 'rover.nav')
         subprocess.run([convbin, '-r', 'ubx', '-v', '3.04', '-o', rover_obs, '-n', rover_nav, rover_ubx],
@@ -105,34 +131,44 @@ def run(args):
         # Several base files (e.g. hourly) are one input to RTKLIB when given as a wildcard.
         base_dir = os.path.join(work, 'base')
         os.mkdir(base_dir)
-        for i, path in enumerate(args.base_obs):
+        for i, path in enumerate(base_obs):
             os.symlink(os.path.abspath(path), os.path.join(base_dir, 'base_%03d.obs' % i))
-        base_obs = os.path.join(base_dir, 'base_*.obs')
-        conf = args.conf
-        if args.antex:
-            # Antenna calibrations come from the ANTEX file, kept outside the options file.
-            conf = os.path.join(work, 'options.conf')
-            with open(args.conf) as src, open(conf, 'w') as dst:
-                dst.write(src.read())
-                dst.write('\nfile-rcvantfile    =%s\n' % os.path.abspath(args.antex))
-        else:
-            print('warning: no --antex file: the phase centre offsets of the base antenna are not '
+        base_pattern = os.path.join(base_dir, 'base_*.obs')
+
+        # The station and the antenna calibrations are appended to the options file; RTKLIB
+        # keeps the last value of an option.
+        options = os.path.join(work, 'options.conf')
+        with open(conf) as src, open(options, 'w') as dst:
+            dst.write(src.read())
+            dst.write('\n# reference station %s\n' % station['name'])
+            dst.write(station_options(station))
+            if antex:
+                dst.write('file-rcvantfile    =%s\n' % os.path.abspath(antex))
+        if not antex:
+            print('warning: no ANTEX file: the phase centre offsets of the base antenna are not '
                   'applied (heights biased by about 0.1 m)', file=sys.stderr)
-        nav_files = [rover_nav] + list(args.base_nav)
-        subprocess.run([rnx2rtkp, '-k', conf, '-o', args.out, rover_obs, base_obs] + nav_files,
+        nav_files = [rover_nav] + list(base_nav)
+        subprocess.run([rnx2rtkp, '-k', options, '-o', out, rover_obs, base_pattern] + nav_files,
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if args.keep_rinex:
+        if keep_rinex:
             for path in (rover_obs, rover_nav):
-                shutil.copy(path, os.path.splitext(args.out)[0] + '_' + os.path.basename(path))
+                shutil.copy(path, os.path.splitext(out)[0] + '_' + os.path.basename(path))
     finally:
         shutil.rmtree(work)
 
-    counts = quality_counts(args.out)
+    counts = quality_counts(out)
     total = sum(counts.values())
-    print('%s: %d epochs' % (args.out, total))
+    print('%s: %d epochs (reference station %s)' % (out, total, station['name']))
     for q in sorted(counts):
         print('  %-6s %6d (%.1f %%)' % (QUALITY.get(q, str(q)), counts[q], 100.0 * counts[q] / total))
-    return 0 if total else 1
+    return counts
+
+
+def run(args):
+    station = load_station(args.station, args.stations)
+    counts = process(args.rover, args.base_obs, args.base_nav, args.conf, args.out, station,
+                     args.antex, args.rtklib_bin, args.keep_rinex)
+    return 0 if sum(counts.values()) else 1
 
 
 def main(argv=None):
@@ -142,6 +178,9 @@ def main(argv=None):
                         help='reference station RINEX observation file(s), e.g. hourly files')
     parser.add_argument('--base-nav', nargs='*', default=[], help='extra RINEX navigation file(s)')
     parser.add_argument('--conf', default=package_config('ppk_rtklib.conf'), help='RTKLIB options file (%(default)s)')
+    parser.add_argument('--station', default='MAL1', help='reference station in --stations (%(default)s)')
+    parser.add_argument('--stations', default=package_config('base_stations.yaml'),
+                        help='reference station catalog (%(default)s)')
     parser.add_argument('--out', required=True, help='output .pos file')
     parser.add_argument('--antex', default='', help='ANTEX file with receiver antenna calibrations, e.g. igs20.atx')
     parser.add_argument('--rtklib-bin', default='', help='directory with convbin and rnx2rtkp (default: PATH)')
@@ -149,7 +188,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         return run(args)
-    except (FileNotFoundError, subprocess.CalledProcessError) as e:
+    except (FileNotFoundError, KeyError, subprocess.CalledProcessError) as e:
         print('error: %s' % e, file=sys.stderr)
         return 2
 

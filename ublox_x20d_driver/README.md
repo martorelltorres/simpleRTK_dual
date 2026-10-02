@@ -352,33 +352,68 @@ useful multi-frequency solution.
 ## PPK post-processing
 
 Without corrections at sea, centimetre positions come from post-processing the raw
-observations of the mission against a GNSS reference station:
+observations of the mission against a GNSS reference station. Record the mission with
+`enable_raw_observables: true` and keep `~nav_pvt` and `~nav_hpposllh` in the bag (plus
+`~rxm_rawx` and `~rxm_sfrbx` if the `.ubx` raw log may not be kept). Then one command
+gives the final solution:
 
-1. **Record** with `enable_raw_observables: true`: the `.ubx` raw log, or a bag with
-   `~rxm_rawx` and `~rxm_sfrbx` (rebuild the `.ubx` with `bag_to_ubx.py`). Also record
-   `~nav_pvt` and `~nav_hpposllh` for step 4.
-2. **Download the reference station data** (RINEX observations, and navigation data if
-   available) covering the mission, from a public GNSS network close to the area of
-   operation, e.g. the hourly 1 s files of the Spanish IGN network (ERGNSS). The shorter the
-   baseline, the better: up to a few tens of kilometres. Networks often distribute
-   Hatanaka-compressed files (`.crx`); decompress them with `crx2rnx` from RNXCMP.
+```bash
+rosrun ublox_x20d_driver ppk_pipeline.py --bag mission.bag --out-dir ppk/ \
+  --ubx ~/.ros/ubx/x20d_20261002_*.ubx
+```
+
+It runs the steps below and writes `ppk/mission.pos` (RTKLIB solution),
+`ppk/mission_ppk.bag` and `ppk/mission_ppk.csv` (fused solution):
+
+1. reads the time span of the mission from the `NAV-PVT` messages of the bag;
+2. takes the rover observations from `--ubx`, in time order, or, without `--ubx`, rebuilds
+   them from `~rxm_rawx`/`~rxm_sfrbx` of the bag (`ppk/mission_rover.ubx`). The raw log
+   usually starts earlier than the bag, so prefer `--ubx` when the files are available;
+3. downloads the hourly RINEX files of the reference station for every hour of the span
+   (plus `margin_s`), decompresses them (gzip and `crx2rnx` from RNXCMP) and keeps them in
+   `cache_dir`. Hourly files are published once the hour has ended: a mission that ended
+   minutes ago fails with an "hour ... not published" error until then. Without network,
+   pass the station files with `--base-obs` and `--base-nav`;
+4. computes the PPK solution (`ppk_process.py`);
+5. fuses it with the live solution (`ppk_fuse.py`).
+
+Settings are in `config/ppk_pipeline.yaml`: reference station, ANTEX file, RTKLIB and
+`crx2rnx` directories, cache directory. RTKLIB-EX is required (see step 3 below);
+`crx2rnx` is part of RNXCMP (Hatanaka compression, https://terras.gsi.go.jp/ja/crx2rnx.html):
+build it and put it in `PATH`, or set `crx2rnx_bin`. The steps can also be run one by one, as described
+next.
+
+### Reference stations
+
+`config/base_stations.yaml` holds the reference stations: the coordinates of the station
+mark from its station sheet (ETRS89, so the PPK solution is in ETRS89 too), the height of
+the antenna reference point above the mark, and the network that publishes its hourly
+files. It ships with MAL1 of the Spanish IGN network (ERGNSS, Palma de Mallorca). The
+shorter the baseline, the better: up to a few tens of kilometres. To use another station,
+add an entry with the values of its sheet and select it with `station` in
+`ppk_pipeline.yaml` or `--station` in `ppk_process.py`.
+
+### Steps one by one
+
+1. **Rover observations**: the `.ubx` raw log, or a `.ubx` rebuilt from the bag with
+   `bag_to_ubx.py`.
+2. **Reference station data**: RINEX observations, and navigation data if available,
+   covering the mission. Networks often distribute Hatanaka-compressed files (`.crx`);
+   decompress them with `crx2rnx`.
 3. **Process** with RTKLIB through `scripts/ppk_process.py`:
 
    ```bash
    rosrun ublox_x20d_driver ppk_process.py --rover ~/.ros/ubx/x20d_*.ubx \
      --base-obs BASE_07.rnx BASE_08.rnx --base-nav BASE_*_MN.rnx \
-     --antex igs20.atx --out mission.pos
+     --station MAL1 --antex igs20.atx --out mission.pos
    ```
 
    The options are in `config/ppk_rtklib.conf` (kinematic, forward and backward combined,
-   GPS + GLONASS + Galileo + BeiDou, L1 + L2 + L5). The reference station is set there with
-   the coordinates of its station sheet (`ant2-pos1..3`, ETRS89) and the height of its
-   antenna above the mark (`ant2-antdelu`); it is MAL1 of the IGN network (Palma de
-   Mallorca), replace those values for another station. The PPK solution is in the frame of
-   the station coordinates. `--antex` gives the antenna calibrations (e.g. the IGS file
-   `igs20.atx`); without it the phase centre offsets of the base antenna are not applied
-   and heights are biased by about 0.1 m. Several base files (e.g. hourly) are processed
-   as one.
+   GPS + GLONASS + Galileo + BeiDou, L1 + L2 + L5); the script adds the coordinates and
+   antenna height of the station from `config/base_stations.yaml`. `--antex` gives the
+   antenna calibrations (e.g. the IGS file `igs20.atx`); without it the phase centre
+   offsets of the base antenna are not applied and heights are biased by about 0.1 m.
+   Several base files (e.g. hourly) are processed as one.
 
    RTKLIB 2.4.3 (the Ubuntu 20.04 package) keeps only the L1 signals of the ZED-X20D and
    the script warns when it is used. RTKLIB-EX 2.5.1 extracts GPS L1/L2/L5, GLONASS L1/L2,
@@ -478,6 +513,9 @@ catkin build && catkin run_tests && catkin_test_results
   data with `rosrun ublox_x20d_driver make_test_ubx.py`; its docstring describes each epoch.
 - **`check_recording.py` tests** (nose) run it on the sample data, including cases it must
   reject. They are skipped when pyubx2 is not installed.
+- **PPK tests** (nose) cover the raw observation encoding, the fusion filter, the choice of
+  reference station hours and file names, and the download and cache of station files
+  against a local HTTP server. They need neither network nor RTKLIB.
 
 ## License and acknowledgements
 
